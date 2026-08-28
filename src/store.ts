@@ -93,7 +93,7 @@ export interface StoreState extends AisleState {
 
   setAgentConnected: () => void
   setWebmcp: (available: boolean, toolNames: string[]) => void
-  logAgent: (tool: string, summary: string) => void
+  logActivity: (tool: string, summary: string, source?: 'agent' | 'you') => void
   markTouched: (ids: string[]) => void
   setSelection: (sel: Selection | null) => void
   setDraggingGuest: (id: string | null) => void
@@ -436,9 +436,9 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setWebmcp: (available, toolNames) => set({ webmcpAvailable: available, toolNames }),
 
-  logAgent: (tool, summary) => {
+  logActivity: (tool, summary, source = 'agent') => {
     set((s) => ({
-      agentLog: [{ id: uid(), time: Date.now(), tool, summary }, ...s.agentLog].slice(0, 80),
+      agentLog: [{ id: uid(), time: Date.now(), tool, summary, source }, ...s.agentLog].slice(0, 80),
     }))
   },
 

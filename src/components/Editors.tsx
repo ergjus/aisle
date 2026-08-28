@@ -98,11 +98,11 @@ function TableEditor({ sel }: { sel: Selection }) {
         <label>
           Seats
           <div className="stepper">
-            <button onClick={() => s.updateTable(t.id, { seats: t.seats - 1 })} disabled={t.seats <= 2}>
+            <button aria-label="Remove a seat" onClick={() => s.updateTable(t.id, { seats: t.seats - 1 })} disabled={t.seats <= 2}>
               −
             </button>
             <span style={{ fontWeight: 700 }}>{t.seats}</span>
-            <button onClick={() => s.updateTable(t.id, { seats: t.seats + 1 })} disabled={t.seats >= 16}>
+            <button aria-label="Add a seat" onClick={() => s.updateTable(t.id, { seats: t.seats + 1 })} disabled={t.seats >= 16}>
               +
             </button>
           </div>
@@ -123,7 +123,7 @@ function TableEditor({ sel }: { sel: Selection }) {
       </div>
       <div className="actions">
         <button className="btn btn-danger" onClick={() => s.removeTable(t.id)}>
-          Remove table
+          Remove Table
         </button>
         <button className="btn btn-quiet" onClick={() => s.setSelection(null)}>
           Done

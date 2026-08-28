@@ -18,7 +18,7 @@ Neither of you could do this alone. That's the point.
 ## Try it in 90 seconds
 
 1. Open the [live app](https://aisle-ergjus-projects.vercel.app) in an agent-enabled browser (see [Testing with an agent](#testing-with-an-agent)).
-2. Click **Load sample wedding** — 72 guests, 10 tables, and 17 rules including a divorce, an ex-couple, a neighborly fence war, and a grandmother who hates loud speakers.
+2. Click **Load Sample Wedding** — 72 guests, 10 tables, and 17 rules including a divorce, an ex-couple, a neighborly fence war, and a grandmother who hates loud speakers.
 3. Ask your agent: *"Seat everyone. Keep the exes apart and put Grandma far from the band."*
 4. Watch the room arrange itself, with a plain-language explanation of every trade-off.
 5. Drag Sam Whitfield onto Jordan's table. Watch the violation line appear and the drama meter rise.
@@ -66,10 +66,11 @@ That last one is the dynamic-registration story in miniature: the *toolset itsel
 Everything the agent can do, you can do by hand on the same state:
 
 - **Drag** any guest chip between tables and the lounge; drag tables around the room (zone rules like "near the dance floor" are computed from real table positions, so moving a table can genuinely fix — or cause — a violation).
-- **Click** any chip or table to edit details in place.
+- **Click** any chip or table to edit details in place — or Tab to it and press Enter; the canvas is keyboard-accessible.
+- **Seat Everyone** runs the same solver the agent uses, straight from the header; when rules break, a **"⚠ N rules broken · Fix With Minimal Moves"** banner appears on the chart and repairs the room in one click.
 - **Undo/redo** every change, yours or the agent's (⌘Z — the veto button).
-- Violated rules draw animated dashed lines between the offending guests, badge the table, and feed the **drama meter** (*Serene → Simmering → Full telenovela*).
-- The agent's actions stream into an activity feed, and everything it touches glows gold for a moment with a name tag, so bulk rearrangements stay legible.
+- Violated rules draw animated dashed lines between the offending guests, badge the table, and feed the **drama meter** (*Serene → Simmering → Full telenovela*); a legend on the chart decodes the group colors.
+- Actions stream into a shared activity feed — the agent's entries in gold, yours labeled *You* — and everything the agent touches glows for a moment with a name tag, so bulk rearrangements stay legible.
 
 The chart is a real seating planner without any agent at all — with a visible hint inviting you to bring one.
 

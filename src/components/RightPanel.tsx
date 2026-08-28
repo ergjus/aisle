@@ -37,7 +37,7 @@ function AddRule() {
 
   return (
     <div className="add-constraint">
-      <select value={type} onChange={(e) => setType(e.target.value)}>
+      <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Kind of rule">
         {RULE_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -45,7 +45,7 @@ function AddRule() {
         ))}
       </select>
       <div className="row">
-        <select value={a} onChange={(e) => setA(e.target.value)}>
+        <select value={a} onChange={(e) => setA(e.target.value)} aria-label={isPair ? 'First guest' : 'Guest'}>
           <option value="">{isPair ? 'First guest…' : 'Guest…'}</option>
           {guests.map((g) => (
             <option key={g.id} value={g.id}>
@@ -54,7 +54,7 @@ function AddRule() {
           ))}
         </select>
         {isPair && (
-          <select value={b} onChange={(e) => setB(e.target.value)}>
+          <select value={b} onChange={(e) => setB(e.target.value)} aria-label="Second guest">
             <option value="">Second guest…</option>
             {guests
               .filter((g) => g.id !== a)
@@ -67,9 +67,22 @@ function AddRule() {
         )}
       </div>
       <button className="btn" onClick={add} disabled={!a || (isPair && (!b || a === b))}>
-        Add rule
+        Add Rule
       </button>
     </div>
+  )
+}
+
+function RuleSummary() {
+  const s = useStore()
+  const counts = { ok: 0, violated: 0, pending: 0 }
+  for (const c of s.constraints) counts[constraintStatus(s, c)]++
+  return (
+    <p className="rule-summary">
+      <span className="k ok">{counts.ok} kept</span>
+      {counts.violated > 0 && <span className="k violated"> · {counts.violated} broken</span>}
+      {counts.pending > 0 && <span className="k pending"> · {counts.pending} waiting on seats</span>}
+    </p>
   )
 }
 
@@ -90,6 +103,9 @@ export function RightPanel() {
         <h2>
           House rules <span className="count">{s.constraints.length}</span>
         </h2>
+        {s.constraints.length > 0 && (
+          <RuleSummary />
+        )}
         {s.constraints.length === 0 && (
           <p style={{ color: 'var(--ink-soft)', fontSize: 12.5 }}>
             No seating rules yet. Rules like “keep the exes apart” live here — you can add them below, or just tell your
@@ -98,14 +114,20 @@ export function RightPanel() {
         )}
         {s.constraints.map((c) => {
           const status = constraintStatus(s, c)
+          const statusText = status === 'ok' ? 'kept' : status === 'violated' ? 'broken' : 'waiting — someone is unseated'
           return (
             <div className="constraint-row" key={c.id}>
-              <span className={`status ${status}`} title={status} />
+              <span className={`status ${status}`} title={statusText} aria-label={statusText} role="img" />
               <span className="text">
                 {constraintText(s, c)}
                 {c.note && <span className="note">{c.note}</span>}
               </span>
-              <button className="remove" title="Remove rule" onClick={() => s.removeConstraint(c.id)}>
+              <button
+                className="remove"
+                title="Remove rule"
+                aria-label={`Remove rule: ${constraintText(s, c)}`}
+                onClick={() => s.removeConstraint(c.id)}
+              >
                 ×
               </button>
             </div>
@@ -117,7 +139,7 @@ export function RightPanel() {
 
       <section>
         <h2>
-          Agent <span className="count">{s.agentLog.length > 0 ? `${s.agentLog.length} actions` : ''}</span>
+          Activity <span className="count">{s.agentLog.length > 0 ? `${s.agentLog.length} actions` : ''}</span>
         </h2>
         {!s.agentConnected && (
           <div className="agent-hint">
@@ -135,8 +157,10 @@ export function RightPanel() {
         )}
         <div className="agent-feed" style={{ marginTop: 10 }}>
           {s.agentLog.map((e) => (
-            <div className="agent-entry" key={e.id}>
-              <div className="tool">{e.tool}</div>
+            <div className={e.source === 'you' ? 'agent-entry you' : 'agent-entry'} key={e.id}>
+              <div className="tool">
+                {e.source === 'you' ? 'You' : 'Agent'} · {e.tool}
+              </div>
               <div className="summary">{e.summary}</div>
               <div className="when">{timeAgo(e.time)}</div>
             </div>

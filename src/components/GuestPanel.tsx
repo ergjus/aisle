@@ -53,6 +53,7 @@ export function GuestPanel() {
         <div className="row">
           <input
             placeholder="Add a guest…"
+            aria-label="Guest name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submitGuest()}
@@ -60,7 +61,8 @@ export function GuestPanel() {
         </div>
         <div className="row">
           <input
-            placeholder="Group (e.g. College friends)"
+            placeholder="Group (e.g. College friends)…"
+            aria-label="Guest group"
             value={group}
             onChange={(e) => setGroup(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submitGuest()}
@@ -77,7 +79,7 @@ export function GuestPanel() {
         </div>
         <div className="row">
           <button className="btn btn-quiet" onClick={() => setShowImport((v) => !v)} style={{ flex: 1 }}>
-            {showImport ? 'Hide paste box' : 'Paste a list…'}
+            {showImport ? 'Hide Paste Box' : 'Paste a List…'}
           </button>
         </div>
         {showImport && (
@@ -93,7 +95,13 @@ export function GuestPanel() {
           </div>
         )}
       </div>
-      <input className="search" placeholder="Search guests…" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <input
+        className="search"
+        placeholder="Search guests…"
+        aria-label="Search guests"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
       {[...grouped.entries()].map(([groupName, ids]) => (
         <div className="guest-group" key={groupName}>
           <div className="group-head">
@@ -117,7 +125,9 @@ export function GuestPanel() {
                 </span>
                 {g.rsvp === 'pending' && <span className="tag pending">rsvp?</span>}
                 {g.dietary.length > 0 && <span className="tag diet">{g.dietary[0].split(' ')[0]}</span>}
-                <span className="where">{seat ? s.tables[seat.tableId]?.name.replace('Table ', 'T') : '·'}</span>
+                <span className={seat ? 'where' : 'where lounge'}>
+                  {g.rsvp === 'no' ? '—' : seat ? s.tables[seat.tableId]?.name.replace('Table ', 'T') : 'lounge'}
+                </span>
               </button>
             )
           })}

@@ -40,7 +40,11 @@ export default function App() {
         <RightPanel />
       </div>
       <Editors />
-      {toast && <div className="toast">{toast}</div>}
+      {toast && (
+        <div className="toast" role="status" aria-live="polite">
+          {toast}
+        </div>
+      )}
     </div>
   )
 }

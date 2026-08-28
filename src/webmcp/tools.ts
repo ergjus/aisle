@@ -168,7 +168,7 @@ function makeTool(
         result = fail(`Something went wrong in ${name}: ${err instanceof Error ? err.message : String(err)}`)
       }
       if (!opts.readOnly || result.isError) {
-        useStore.getState().logAgent(name, result.text.split('\n')[0].slice(0, 140))
+        useStore.getState().logActivity(name, result.text.split('\n')[0].slice(0, 140), 'agent')
       }
       if (result.touched?.length) useStore.getState().markTouched(result.touched)
       return {

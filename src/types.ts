@@ -54,6 +54,7 @@ export interface AgentLogEntry {
   time: number
   tool: string
   summary: string
+  source: 'agent' | 'you'
 }
 
 export type Violation =

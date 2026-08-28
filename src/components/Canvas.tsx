@@ -17,6 +17,7 @@ import {
 import { computeViolations } from '../constraints'
 import { groupColors, hashId, initials } from '../utils'
 import { SAMPLE } from '../sample'
+import { seatEveryone } from '../actions'
 
 interface DragState {
   kind: 'chip' | 'table'
@@ -40,9 +41,11 @@ function Chip(props: {
   violated: boolean
   touchedAt: number | undefined
   staggerMs: number
+  whereLabel: string
   onPointerDown: (e: React.PointerEvent) => void
+  onKeyDown: (e: React.KeyboardEvent) => void
 }) {
-  const { guest, x, y, color, dragging, selected, violated, touchedAt, staggerMs } = props
+  const { guest, x, y, color, dragging, selected, violated, touchedAt, staggerMs, whereLabel } = props
   // A fresh touchedAt remounts the keyed overlays, replaying their one-shot
   // CSS animations. No JS timers: fill-mode ends them, so nothing can stick.
   const flashing = touchedAt !== undefined && Date.now() - touchedAt < 4000
@@ -59,6 +62,10 @@ function Chip(props: {
         ['--group' as string]: color,
         transitionDelay: dragging ? '0ms' : `${staggerMs}ms`,
       }}
+      role="button"
+      tabIndex={0}
+      aria-label={`${guest.name} — ${whereLabel}${violated ? ' — part of a broken rule' : ''}. Press Enter to edit.`}
+      onKeyDown={props.onKeyDown}
       onPointerDown={props.onPointerDown}
     >
       {initials(guest.name)}
@@ -250,7 +257,9 @@ export function Canvas() {
 
         <div className={`tray${drag?.kind === 'chip' && drag.target === 'tray' ? ' drop-target' : ''}`} style={{ left: TRAY.x, top: TRAY.y, width: TRAY.w, height: TRAY.h }}>
           <span className="tray-label">
-            The lounge — not yet seated{unseatedCount > 0 ? ` · ${unseatedCount}` : ''}
+            {drag?.kind === 'chip'
+              ? 'The lounge — drop here to unseat'
+              : `The lounge — not yet seated${unseatedCount > 0 ? ` · ${unseatedCount}` : ''}`}
           </span>
         </div>
 
@@ -292,6 +301,12 @@ export function Canvas() {
               dropTarget={isTarget}
               dragging={drag?.kind === 'table' && drag.id === tid}
               onPointerDown={(e) => beginDrag(e, 'table', tid, { x: t.x, y: t.y })}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return
+                e.preventDefault()
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                s.setSelection({ kind: 'table', id: tid, at: { x: r.right + 10, y: r.top - 8 } })
+              }}
             />
           )
         })}
@@ -330,16 +345,53 @@ export function Canvas() {
               violated={violatedGuests.has(id)}
               touchedAt={touchedAt}
               staggerMs={recentTouch ? (hashId(id) % 12) * 30 : 0}
+              whereLabel={s.seating[id] ? `at ${s.tables[s.seating[id].tableId]?.name}` : 'in the lounge'}
               onPointerDown={(e) => beginDrag(e, 'chip', id, positions[id])}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return
+                e.preventDefault()
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                s.setSelection({ kind: 'guest', id, at: { x: r.right + 10, y: r.top - 8 } })
+              }}
             />
           )
         })}
 
+        {s.guestOrder.length > 0 && (
+          <div className="legend" aria-label="Chart legend">
+            {Object.entries(colors).map(([group, color]) => (
+              <span className="legend-item" key={group}>
+                <span className="legend-swatch" style={{ background: color }} />
+                {group}
+              </span>
+            ))}
+            {s.constraints.length > 0 && (
+              <span className="legend-item">
+                <span className="legend-line" aria-hidden="true" />
+                broken rule
+              </span>
+            )}
+          </div>
+        )}
+
         {s.finalized && <div className="ribbon">❦ &nbsp;Finalized — every guest seated, zero drama&nbsp; ❦</div>}
+
+        {violations.length > 0 && !s.finalized && (
+          <button
+            className="viol-banner"
+            onClick={() => seatEveryone('repair')}
+            title="Runs the solver in repair mode — fixes every broken rule while moving as few guests as possible"
+          >
+            ⚠ {violations.length} rule{violations.length === 1 ? '' : 's'} broken · Fix With Minimal Moves
+          </button>
+        )}
 
         {!s.agentConnected && !empty && (
           <div className="canvas-hint">
-            <span className="spark">✳</span> This page speaks WebMCP — open it with your AI agent and plan together
+            <span className="spark">✳</span>{' '}
+            {unseatedCount > 0
+              ? 'Drag guests onto tables, press Seat Everyone — or ask your AI agent'
+              : 'This page speaks WebMCP — open it with your AI agent and plan together'}
           </div>
         )}
 
@@ -351,10 +403,10 @@ export function Canvas() {
               family politics.
             </p>
             <button className="btn btn-gold" onClick={() => s.loadSample(SAMPLE)}>
-              Load sample wedding
+              Load Sample Wedding
             </button>{' '}
             <button className="btn" onClick={() => s.addTable()}>
-              Add a table
+              Add a Table
             </button>
           </div>
         )}
@@ -373,6 +425,7 @@ function TableView(props: {
   dropTarget: boolean
   dragging: boolean
   onPointerDown: (e: React.PointerEvent) => void
+  onKeyDown: (e: React.KeyboardEvent) => void
 }) {
   const { table, size, occupied, badge, touchedAt, selected, dropTarget, dragging } = props
   const flashing = touchedAt !== undefined && Date.now() - touchedAt < 4000
@@ -385,15 +438,18 @@ function TableView(props: {
     <div
       className={cls}
       style={{
-        left: table.x,
-        top: table.y,
+        transform: `translate(${table.x}px, ${table.y}px) translate(-50%, -50%)`,
         width: size.w,
         height: size.h,
-        transition: dragging ? 'none' : 'left 500ms ease, top 500ms ease, box-shadow 150ms ease',
+        transition: dragging ? 'box-shadow 150ms ease' : 'transform 500ms ease, box-shadow 150ms ease',
         ...(dropTarget
           ? { boxShadow: 'inset 0 0 0 1px rgba(41,36,25,.22), 0 0 0 3px var(--gold-bright), 0 6px 18px rgba(10,16,12,.45)' }
           : {}),
       }}
+      role="button"
+      tabIndex={0}
+      aria-label={`${table.name} — ${occupied} of ${table.seats} seats filled${badge ? `, ${badge} broken rule${badge === 1 ? '' : 's'}` : ''}. Press Enter to edit.`}
+      onKeyDown={props.onKeyDown}
       onPointerDown={props.onPointerDown}
     >
       <span className="t-name">{table.name}</span>
