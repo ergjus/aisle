@@ -39,6 +39,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   VENUE_FEATURE_IDS,
+  VENUE_PRESET_DEFAULTS,
   amenitiesForPriority,
   expandVenuePreset,
   validateDimensions,
@@ -103,11 +104,18 @@ function usePrefersReducedMotion() {
   return reduced
 }
 
+/** Each preset's size is quoted from the planner, so the copy can't drift
+ *  away from the room the guide actually builds. */
+function presetSize(preset: VenuePreset): string {
+  const { widthFt, lengthFt } = VENUE_PRESET_DEFAULTS[preset]
+  return `${widthFt} × ${lengthFt} ft`
+}
+
 const PRESET_COPY: Record<VenuePreset, { label: string; description: string }> = {
-  ballroom: { label: 'Ballroom', description: 'Classic room with a stage, dance floor, entrance, and restrooms.' },
-  garden_tent: { label: 'Garden / Tent', description: 'An open celebration with bar, buffet, band, and room to roam.' },
-  restaurant: { label: 'Restaurant / Private Room', description: 'A compact private room with entrance, restrooms, and bar.' },
-  custom: { label: 'Custom', description: 'Start from a familiar 60 × 33 ft room and make every choice yourself.' },
+  ballroom: { label: 'Ballroom', description: `A ${presetSize('ballroom')} room with a stage, dance floor, entrance, and restrooms.` },
+  garden_tent: { label: 'Garden / Tent', description: `A ${presetSize('garden_tent')} open celebration with bar, buffet, band, and room to roam.` },
+  restaurant: { label: 'Restaurant / Private Room', description: `A ${presetSize('restaurant')} private room with entrance, restrooms, and bar.` },
+  custom: { label: 'Custom', description: `Start from a ${presetSize('custom')} room and make every choice yourself.` },
 }
 
 const FEATURE_LABELS: Record<VenueFeatureId, string> = {
@@ -360,6 +368,7 @@ function FirstRunDialog({
       }}
     >
       <DialogContent
+        fullscreen
         className="welcome-dialog"
         data-reduced-motion={reducedMotion || undefined}
         showCloseButton={false}
@@ -457,7 +466,8 @@ function FirstRunDialog({
                           Give the room its true proportions.
                         </QuestionnaireTitle>
                         <QuestionnaireDescription render={<CardDescription />}>
-                          Exact feet keep the floor plan honest. Preset values are only a head start.
+                          Exact feet keep the floor plan honest. The preset already has room for every
+                          amenity and all 72 guests — grow it if your venue is larger.
                         </QuestionnaireDescription>
                         <QuestionnaireHeader eyebrow="Dimensions" />
                       </CardHeader>

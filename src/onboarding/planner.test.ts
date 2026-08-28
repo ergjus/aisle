@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { layoutConflicts } from '../geometry'
 import type { PersonalizedDemoConfig } from '../types'
 import {
+  VENUE_FEATURE_IDS,
   amenitiesForPriority,
   attendingSampleGuests,
   buildTablePlan,
@@ -27,22 +28,51 @@ function config(patch: Partial<PersonalizedDemoConfig> = {}): PersonalizedDemoCo
 describe('personalized demo planner', () => {
   it('expands every venue preset without sharing mutable amenity arrays', () => {
     expect(expandVenuePreset('ballroom')).toEqual({
-      widthFt: 60,
-      lengthFt: 33,
+      widthFt: 72,
+      lengthFt: 46,
       amenities: ['entrance', 'dance_floor', 'band', 'bathroom'],
     })
     expect(expandVenuePreset('garden_tent')).toEqual({
-      widthFt: 80,
-      lengthFt: 50,
+      widthFt: 90,
+      lengthFt: 60,
       amenities: ['entrance', 'dance_floor', 'band', 'bathroom', 'bar', 'buffet'],
     })
     expect(expandVenuePreset('restaurant')).toEqual({
-      widthFt: 45,
-      lengthFt: 28,
+      widthFt: 62,
+      lengthFt: 42,
       amenities: ['entrance', 'bathroom', 'bar'],
     })
-    expect(expandVenuePreset('custom')).toEqual({ widthFt: 60, lengthFt: 33, amenities: [] })
+    expect(expandVenuePreset('custom')).toEqual({ widthFt: 72, lengthFt: 46, amenities: [] })
   })
+
+  // The welcome guide must never hand back a default that it then refuses to
+  // build: every preset's room fits every table style, seat count, and focus —
+  // with all nine amenities switched on, not just the preset's own.
+  it.each(['ballroom', 'garden_tent', 'restaurant', 'custom'] as const)(
+    'plans the %s preset at its default size with every amenity enabled',
+    (venuePreset) => {
+      const preset = expandVenuePreset(venuePreset)
+      for (const tableStyle of ['round', 'banquet', 'mixed'] as const) {
+        for (const seatsPerTable of [6, 8, 10] as const) {
+          for (const priority of ['family_harmony', 'dance_floor_energy', 'easy_arrivals'] as const) {
+            const result = planPersonalizedSample({
+              venuePreset,
+              widthFt: preset.widthFt,
+              lengthFt: preset.lengthFt,
+              tableStyle,
+              seatsPerTable,
+              amenities: [...VENUE_FEATURE_IDS],
+              priority,
+            })
+            expect(
+              result.ok,
+              `${venuePreset} ${tableStyle}/${seatsPerTable}/${priority}: ${result.ok ? '' : result.message}`,
+            ).toBe(true)
+          }
+        }
+      }
+    },
+  )
 
   it('validates both exact dimension bounds', () => {
     expect(validateDimensions(20, 15)).toEqual({})

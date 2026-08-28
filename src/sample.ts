@@ -1,4 +1,5 @@
 import type { Constraint, Guest, RSVP, Table } from './types'
+import { ROOM_ORIGIN, ft } from './geometry'
 
 function g(
   id: string,
@@ -108,21 +109,24 @@ export const SAMPLE_GUESTS: Guest[] = [
   g('g-teddy', 'Teddy Dunn', KIDS, { notes: "Charlie's son" }),
 ]
 
-function t(id: string, name: string, shape: Table['shape'], seats: number, x: number, y: number): Table {
-  return { id, name, shape, seats, x, y, rotation: 0 }
+/** Table centers are given in feet from the room's top-left corner, the same
+ *  way the venue's amenities are — this layout is a real floor plan for the
+ *  default room, with the dance floor and band down its right-hand side. */
+function t(id: string, name: string, shape: Table['shape'], seats: number, xFt: number, yFt: number): Table {
+  return { id, name, shape, seats, x: ROOM_ORIGIN.x + ft(xFt), y: ROOM_ORIGIN.y + ft(yFt), rotation: 0 }
 }
 
 export const SAMPLE_TABLES: Table[] = [
-  t('t1', 'Table 1', 'round', 8, 150, 258),
-  t('t2', 'Table 2', 'round', 8, 330, 216),
-  t('t3', 'Table 3', 'round', 8, 515, 250),
-  t('t4', 'Table 4', 'round', 8, 700, 212),
-  t('t5', 'Table 5', 'round', 8, 152, 452),
-  t('t6', 'Table 6', 'round', 8, 338, 428),
-  t('t7', 'Table 7', 'round', 8, 525, 445),
-  t('t8', 'Table 8', 'round', 8, 712, 425),
-  t('t9', 'Table 9', 'rect', 10, 340, 635),
-  t('t10', 'Table 10', 'rect', 10, 660, 635),
+  t('t1', 'Table 1', 'round', 8, 7, 12),
+  t('t2', 'Table 2', 'round', 8, 17.5, 12),
+  t('t3', 'Table 3', 'round', 8, 28, 12),
+  t('t4', 'Table 4', 'round', 8, 38.5, 12),
+  t('t5', 'Table 5', 'round', 8, 7, 23),
+  t('t6', 'Table 6', 'round', 8, 17.5, 23),
+  t('t7', 'Table 7', 'round', 8, 28, 23),
+  t('t8', 'Table 8', 'round', 8, 38.5, 23),
+  t('t9', 'Table 9', 'rect', 10, 20, 38),
+  t('t10', 'Table 10', 'rect', 10, 40, 38),
 ]
 
 export const SAMPLE_CONSTRAINTS: Constraint[] = [

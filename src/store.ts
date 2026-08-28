@@ -14,7 +14,7 @@ import type {
   VenueDimensions,
   ZoneId,
 } from './types'
-import { ROOM, featureBounds, findFreeSpot, freshVenue, freshVenueDimensions, legacyFittedRoomRect, roomRect, stageUnitsPerFoot, tableBodyBounds } from './geometry'
+import { ROOM, WALL_MARGIN, containDelta, featureBounds, findFreeSpot, freshVenue, freshVenueDimensions, legacyFittedRoomRect, roomRect, stageUnitsPerFoot, tableBounds } from './geometry'
 import { planPersonalizedSample, type PersonalizedPlannerResult } from './onboarding/planner'
 
 export function uid(): string {
@@ -58,6 +58,16 @@ function coreOf(s: StoreState): AisleState {
     venue: s.venue,
     venueDimensions: s.venueDimensions,
     demoMetadata: s.demoMetadata,
+  }
+}
+
+/** The next free "Table N", so a new table never doubles up on a name a
+ *  removal left behind or the sample already claimed. */
+export function nextTableName(existing: string[]): string {
+  const taken = new Set(existing.map((name) => name.trim().toLowerCase()))
+  for (let n = 1; ; n++) {
+    const name = `Table ${n}`
+    if (!taken.has(name.toLowerCase())) return name
   }
 }
 
@@ -147,7 +157,7 @@ export interface StoreState extends AisleState {
   /** Removes a group that has no guests in it. No-op otherwise. */
   removeGroup: (name: string) => void
 
-  addTable: (fields?: Partial<Omit<Table, 'id'>>) => Table
+  addTable: (fields?: Partial<Omit<Table, 'id'>>, opts?: { snapshot?: boolean }) => Table
   updateTable: (id: string, patch: Partial<Omit<Table, 'id'>>, opts?: { snapshot?: boolean }) => { unseated: string[] }
   removeTable: (id: string) => { unseated: string[] }
   moveTable: (id: string, x: number, y: number, opts?: { snapshot?: boolean }) => void
@@ -248,18 +258,14 @@ function loadPersisted(): AisleState {
     // Keep every persisted item recoverable even if a room was made smaller.
     merged.tables = Object.fromEntries(
       Object.entries(merged.tables as Record<string, Table>).map(([id, table]) => {
-        const bounds = tableBodyBounds(table, dimensions)
-        const dx = Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
-        const dy = Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+        const { dx, dy } = containDelta(tableBounds(table, dimensions), room)
         return [id, { ...table, x: table.x + dx, y: table.y + dy }]
       }),
     ) as AisleState['tables']
     merged.venue = Object.fromEntries(
       Object.entries(merged.venue as Record<VenueFeatureId, VenueFeature>).map(([id, feature]) => {
-        const resized = { ...feature, w: Math.min(feature.w, room.w - 12), h: Math.min(feature.h, room.h - 12) }
-        const bounds = featureBounds(resized)
-        const dx = Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
-        const dy = Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+        const resized = { ...feature, w: Math.min(feature.w, room.w - WALL_MARGIN * 2), h: Math.min(feature.h, room.h - WALL_MARGIN * 2) }
+        const { dx, dy } = containDelta(featureBounds(resized), room)
         return [id, { ...resized, x: resized.x + dx, y: resized.y + dy }]
       }),
     ) as AisleState['venue']
@@ -468,21 +474,27 @@ export const useStore = create<StoreState>((set, get) => ({
     return added
   },
 
-  addTable: (fields = {}) => {
+  addTable: (fields = {}, opts) => {
     const s = get()
-    s.snapshot('add table')
-    const spot = fields.x !== undefined && fields.y !== undefined
-      ? { x: fields.x, y: fields.y }
-      : findFreeSpot(coreOf(s))
-    const table: Table = {
+    // Adding a row of tables at once is one action to undo, not one per table.
+    if (opts?.snapshot !== false) s.snapshot('add table')
+    const draft: Table = {
       id: uid(),
-      name: fields.name?.trim() || `Table ${s.tableOrder.length + 1}`,
+      name: fields.name?.trim() || nextTableName(s.tableOrder.map((id) => s.tables[id].name)),
       shape: (fields.shape as TableShape) ?? 'round',
       seats: Math.max(2, Math.min(16, fields.seats ?? 8)),
-      x: spot.x,
-      y: spot.y,
+      x: 0,
+      y: 0,
       rotation: fields.rotation ?? 0,
     }
+    // An open spot has to fit *this* table's chairs, so the search knows its size.
+    const spot = fields.x !== undefined && fields.y !== undefined
+      ? { x: fields.x, y: fields.y }
+      : findFreeSpot(coreOf(s), draft)
+    const room = roomRect(s.venueDimensions)
+    const placed = { ...draft, x: spot.x, y: spot.y }
+    const { dx, dy } = containDelta(tableBounds(placed, s.venueDimensions), room)
+    const table: Table = { ...placed, x: placed.x + dx, y: placed.y + dy }
     set((st) => ({
       tables: { ...st.tables, [table.id]: table },
       tableOrder: [...st.tableOrder, table.id],
@@ -506,9 +518,8 @@ export const useStore = create<StoreState>((set, get) => ({
         id,
       }
       const room = roomRect(st.venueDimensions)
-      const bounds = tableBodyBounds(next, st.venueDimensions)
-      const dx = Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
-      const dy = Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+      // A table that grew a seat can outgrow its corner — walk it back in.
+      const { dx, dy } = containDelta(tableBounds(next, st.venueDimensions), room)
       next = { ...next, x: next.x + dx, y: next.y + dy }
       const seating = { ...st.seating }
       // Shrinking a table bumps the highest seat numbers back to the lounge.
@@ -562,9 +573,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set((st) => {
       const room = roomRect(st.venueDimensions)
       let next = { ...st.venue[id], ...patch, id }
-      const bounds = featureBounds(next)
-      const dx = Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
-      const dy = Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+      const { dx, dy } = containDelta(featureBounds(next), room)
       next = { ...next, x: next.x + dx, y: next.y + dy }
       return { venue: { ...st.venue, [id]: next }, finalized: false }
     })
@@ -590,9 +599,7 @@ export const useStore = create<StoreState>((set, get) => ({
       const nextRoom = roomRect(nextDimensions)
       const tables = Object.fromEntries(
         Object.entries(st.tables).map(([id, table]) => {
-          const bounds = tableBodyBounds(table, nextDimensions)
-          const dx = Math.max(nextRoom.x + 6 - bounds.left, Math.min(nextRoom.x + nextRoom.w - 6 - bounds.right, 0))
-          const dy = Math.max(nextRoom.y + 6 - bounds.top, Math.min(nextRoom.y + nextRoom.h - 6 - bounds.bottom, 0))
+          const { dx, dy } = containDelta(tableBounds(table, nextDimensions), nextRoom)
           return [id, { ...table, x: table.x + dx, y: table.y + dy }]
         }),
       ) as AisleState['tables']
@@ -600,12 +607,10 @@ export const useStore = create<StoreState>((set, get) => ({
         Object.entries(st.venue).map(([id, feature]) => {
           let next = {
             ...feature,
-            w: Math.min(feature.w, nextRoom.w - 12),
-            h: Math.min(feature.h, nextRoom.h - 12),
+            w: Math.min(feature.w, nextRoom.w - WALL_MARGIN * 2),
+            h: Math.min(feature.h, nextRoom.h - WALL_MARGIN * 2),
           }
-          const bounds = featureBounds(next)
-          const dx = Math.max(nextRoom.x + 6 - bounds.left, Math.min(nextRoom.x + nextRoom.w - 6 - bounds.right, 0))
-          const dy = Math.max(nextRoom.y + 6 - bounds.top, Math.min(nextRoom.y + nextRoom.h - 6 - bounds.bottom, 0))
+          const { dx, dy } = containDelta(featureBounds(next), nextRoom)
           next = { ...next, x: next.x + dx, y: next.y + dy }
           return [id, next]
         }),

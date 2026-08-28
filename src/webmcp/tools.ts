@@ -1,6 +1,6 @@
 import { getCore, occupantsOf, uid, useStore } from '../store'
 import type { AisleState, Guest, RSVP, Table, VenueFeatureId, ZoneId } from '../types'
-import { ROOM, featureMinSize, feetSize, formatFeet, layoutConflicts, roomRect, stageUnitsPerFoot, tableBodyBounds, zoneBands } from '../geometry'
+import { ROOM, WALL_MARGIN, containDelta, featureMinSize, feetSize, formatFeet, layoutConflicts, outOfRoomItems, roomRect, stageUnitsPerFoot, tableBounds, zoneBands } from '../geometry'
 import { computeViolations, constraintStatus, constraintText, dramaLabel, dramaScore, findDuplicateRule } from '../constraints'
 import { autoArrange } from '../solver'
 import { SAMPLE } from '../sample'
@@ -8,7 +8,7 @@ import { chartMarkdown, parseGuestEntries } from '../utils'
 import { buildDocModel, chartCSV, type ExportSections, type PaperSize } from '../export/model'
 import { loadExportOptions, saveExportOptions } from '../export/options'
 import { syncTools, webmcpAvailable, type WebTool } from './adapter'
-import { choreograph, glance, touchAgentSession } from '../agentCursor'
+import { choreograph, endAgentSession, glance, touchAgentSession } from '../agentCursor'
 
 // ---- result helpers --------------------------------------------------------
 
@@ -16,18 +16,32 @@ interface HandlerResult {
   text: string
   touched?: string[]
   isError?: boolean
+  /** Short human sentence for the shared activity feed; defaults to the reply's first line. */
+  log?: string
+  /** Spoken through the cursor's bubble instead of diff choreography — narration tools. */
+  say?: string
+  /** The agent declared itself finished — retire the cursor once `say` has played. */
+  endSession?: boolean
   /** Runs after the choreography settles; its return is appended to the reply.
    *  Lets a tool hold its answer open for something slower than animation —
    *  like a human deciding on a proposal. */
   finish?: () => Promise<string>
 }
 
-function ok(text: string, touched?: string[]): HandlerResult {
-  return { text, touched }
+function ok(text: string, touched?: string[], log?: string): HandlerResult {
+  return { text, touched, log }
 }
 
 function fail(text: string): HandlerResult {
   return { text, isError: true }
+}
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+/** ['moved', 'resized', 'rotated'] → "moved, resized and rotated" */
+function joinWords(words: string[]): string {
+  if (words.length <= 1) return words[0] ?? ''
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -69,16 +83,26 @@ function waitForProposalDecision(id: string, timeoutMs: number): Promise<'keep' 
 
 /** "Table 2 overlaps Dance floor"-style lines for the whole floor plan. */
 function conflictLines(state: AisleState): string[] {
-  return layoutConflicts(state).map((c) => `${c.aLabel} overlaps ${c.bLabel}`)
+  return [
+    ...layoutConflicts(state).map((c) => `${c.aLabel} overlaps ${c.bLabel}`),
+    ...outOfRoomItems(state).map(
+      (item) => `${item.label} reaches ${formatFeet(item.overhangFt)} past the room's wall`,
+    ),
+  ]
 }
 
 /** Warning suffix for tool replies that placed, resized, or rotated `ids`. */
-function overlapWarning(state: AisleState, ids: string[]): string {
-  const involved = layoutConflicts(state).filter((c) => ids.includes(c.aId) || ids.includes(c.bId))
-  if (involved.length === 0) return ''
-  return ` ⚠ Overlapping: ${involved
-    .map((c) => `${c.aLabel} × ${c.bLabel}`)
-    .join(', ')} — move, shrink, or rotate one of them to clear the conflict.`
+function layoutWarning(state: AisleState, ids: string[]): string {
+  const warnings = [
+    ...layoutConflicts(state)
+      .filter((c) => ids.includes(c.aId) || ids.includes(c.bId))
+      .map((c) => `${c.aLabel} × ${c.bLabel} overlap`),
+    ...outOfRoomItems(state)
+      .filter((item) => ids.includes(item.id))
+      .map((item) => `${item.label} reaches ${formatFeet(item.overhangFt)} past the wall`),
+  ]
+  if (warnings.length === 0) return ''
+  return ` ⚠ ${warnings.join(', ')} — move, shrink, or rotate to clear it, or enlarge the room with set_venue_dimensions.`
 }
 
 // ---- fuzzy lookup ----------------------------------------------------------
@@ -178,7 +202,7 @@ function roomSummary(state: AisleState): string {
   if (unseated.length) lines.push(`Unseated: ${unseated.map((id) => state.guests[id].name).join(', ')}`)
   const conflicts = conflictLines(state)
   if (conflicts.length) {
-    lines.push('Layout conflicts (furniture on top of each other — fix by moving, shrinking, or rotating via update_table / update_venue):')
+    lines.push('Layout problems (furniture on top of each other, or past a wall — fix by moving, shrinking, or rotating via update_table / update_venue, or by enlarging the room):')
     for (const c of conflicts) lines.push(`  ⚠ ${c}`)
   }
   if (state.constraints.length) {
@@ -297,17 +321,24 @@ function makeTool(
         result = fail(`Something went wrong in ${name}: ${err instanceof Error ? err.message : String(err)}`)
       }
       if (!opts.readOnly || result.isError) {
-        useStore.getState().logActivity(name, result.text.split('\n')[0].slice(0, 140), 'agent')
+        // The feed is for the human: prefer the tool's own plain-language line
+        // over the agent-facing reply with its coordinates and warnings.
+        const line = result.log ?? result.text.split('\n')[0]
+        useStore.getState().logActivity(name, line.slice(0, 140), 'agent')
       }
       let played: Promise<void> = Promise.resolve()
       if (!result.isError) {
         try {
           if (opts.readOnly) {
-            if (READ_GLANCES[name]) glance(READ_GLANCES[name])
+            if (READ_GLANCES[name]) void glance(READ_GLANCES[name])
+          } else if (result.say) {
+            // Narration tools speak through the cursor instead of a state diff.
+            played = glance(result.say)
+            if (result.endSession) endAgentSession()
           } else {
             played = choreograph({
               tool: name,
-              summary: result.text,
+              summary: result.log ?? result.text,
               before,
               after: getCore(),
               touched: result.touched ?? [],
@@ -343,6 +374,16 @@ function makeTool(
 function baseTools(): WebTool[] {
   return [
     makeTool(
+      'share_plan',
+      'Tell the human what you are about to do, before you start a multi-step change — one or two plain-language sentences, e.g. "I\'ll seat both families first, then sort out the two feuds." It appears as a speech bubble on your cursor and in the shared activity feed. Use it at the start of a task and again whenever the plan changes; it makes your work much easier to follow.',
+      obj({ plan: str('What you are about to do, in one or two short sentences') }, ['plan']),
+      (args) => {
+        const plan = String(args.plan ?? '').trim()
+        if (!plan) return fail('Give a short plan to share.')
+        return { text: `Plan shared with the human: “${plan}”`, log: plan, say: plan }
+      },
+    ),
+    makeTool(
       'update_venue',
       'Configure the shared venue floor plan. Show, hide, place, resize, and rotate the entrance, dance floor, band & speakers, restrooms, photo booth, bar, buffet & catering, cake table, or gifts & cards table. Prefer the real-world *_ft fields, measured from the room’s top-left; legacy x/y/width/height floor-plan units remain supported. The reply warns if the amenity now overlaps a table or another amenity. The human sees the same saved layout and can adjust it afterward.',
       obj(
@@ -374,8 +415,8 @@ function baseTools(): WebTool[] {
         if (typeof args.enabled === 'boolean') patch.enabled = args.enabled
         const requestedWidth = typeof args.width_ft === 'number' ? args.width_ft * units.x : args.width
         const requestedHeight = typeof args.height_ft === 'number' ? args.height_ft * units.y : args.height
-        if (typeof requestedWidth === 'number') patch.w = Math.max(min.w, Math.min(room.w - 16, requestedWidth))
-        if (typeof requestedHeight === 'number') patch.h = Math.max(min.h, Math.min(room.h - 16, requestedHeight))
+        if (typeof requestedWidth === 'number') patch.w = Math.max(min.w, Math.min(room.w - WALL_MARGIN * 2, requestedWidth))
+        if (typeof requestedHeight === 'number') patch.h = Math.max(min.h, Math.min(room.h - WALL_MARGIN * 2, requestedHeight))
         if (typeof args.rotation === 'number') patch.rotation = ((args.rotation % 360) + 360) % 360
         const proposed = { ...feature, ...patch }
         if (args.location) {
@@ -388,19 +429,30 @@ function baseTools(): WebTool[] {
         const height = patch.h ?? feature.h
         const requestedX = typeof args.x_ft === 'number' ? args.x_ft * units.x : args.x
         const requestedY = typeof args.y_ft === 'number' ? args.y_ft * units.y : args.y
-        if (typeof requestedX === 'number') patch.x = Math.max(room.x + 8, Math.min(room.x + room.w - width - 8, room.x + requestedX))
-        if (typeof requestedY === 'number') patch.y = Math.max(room.y + 8, Math.min(room.y + room.h - height - 8, room.y + requestedY))
+        if (typeof requestedX === 'number') patch.x = Math.max(room.x + WALL_MARGIN, Math.min(room.x + room.w - width - WALL_MARGIN, room.x + requestedX))
+        if (typeof requestedY === 'number') patch.y = Math.max(room.y + WALL_MARGIN, Math.min(room.y + room.h - height - WALL_MARGIN, room.y + requestedY))
         const x = patch.x ?? feature.x
         const y = patch.y ?? feature.y
-        if (patch.w !== undefined) patch.w = Math.min(patch.w, room.x + room.w - x - 8)
-        if (patch.h !== undefined) patch.h = Math.min(patch.h, room.y + room.h - y - 8)
+        if (patch.w !== undefined) patch.w = Math.min(patch.w, room.x + room.w - x - WALL_MARGIN)
+        if (patch.h !== undefined) patch.h = Math.min(patch.h, room.y + room.h - y - WALL_MARGIN)
         if (Object.keys(patch).length === 0) return fail('Give enabled, a named location, position, size, or rotation to change the venue.')
         useStore.getState().updateVenueFeature(id, patch)
         const after = getCore().venue[id]
         const afterSize = feetSize(after.w, after.h, getCore().venueDimensions)
+        const did: string[] = []
+        if (patch.x !== undefined || patch.y !== undefined) did.push('moved')
+        if (patch.w !== undefined || patch.h !== undefined) did.push('resized')
+        if (patch.rotation !== undefined) did.push('rotated')
+        const log =
+          patch.enabled === false
+            ? `Took the ${after.label.toLowerCase()} off the plan.`
+            : patch.enabled === true
+              ? `Added the ${after.label.toLowerCase()} to the plan.`
+              : `${cap(joinWords(did.length ? did : ['adjusted']))} the ${after.label.toLowerCase()}.`
         return ok(
-          `${after.label} is ${after.enabled ? `shown at (${formatFeet((after.x - room.x) / units.x)}, ${formatFeet((after.y - room.y) / units.y)}), sized ${formatFeet(afterSize.w)} × ${formatFeet(afterSize.h)}, rotated ${Math.round(after.rotation)}°` : 'hidden'}.${after.enabled ? overlapWarning(getCore(), [id]) : ''}`,
+          `${after.label} is ${after.enabled ? `shown at (${formatFeet((after.x - room.x) / units.x)}, ${formatFeet((after.y - room.y) / units.y)}), sized ${formatFeet(afterSize.w)} × ${formatFeet(afterSize.h)}, rotated ${Math.round(after.rotation)}°` : 'hidden'}.${after.enabled ? layoutWarning(getCore(), [id]) : ''}`,
           [id],
+          log,
         )
       },
     ),
@@ -420,9 +472,15 @@ function baseTools(): WebTool[] {
         if (Object.keys(patch).length === 0) return fail('Give width_ft, length_ft, or snap_ft to update the room.')
         useStore.getState().updateVenueDimensions(patch)
         const dimensions = getCore().venueDimensions
+        const resized = patch.widthFt !== undefined || patch.lengthFt !== undefined
         return ok(
           `Room calibrated to ${formatFeet(dimensions.widthFt)} × ${formatFeet(dimensions.lengthFt)} with ${dimensions.snapFt > 0 ? `${formatFeet(dimensions.snapFt)} snapping` : 'snapping off'}.`,
           ['venue-dimensions'],
+          resized
+            ? `Set the room to ${formatFeet(dimensions.widthFt)} × ${formatFeet(dimensions.lengthFt)}.`
+            : dimensions.snapFt > 0
+              ? `Set the snap grid to ${formatFeet(dimensions.snapFt)}.`
+              : 'Turned grid snapping off.',
         )
       },
     ),
@@ -559,7 +617,11 @@ function baseTools(): WebTool[] {
           rsvp: ['yes', 'no', 'pending'].includes(String(args.rsvp)) ? (String(args.rsvp) as RSVP) : 'yes',
           notes: args.notes ? String(args.notes) : undefined,
         })
-        return ok(`Added ${guest.name} (${guest.group}). They are in the lounge, unseated.`, [guest.id])
+        return ok(
+          `Added ${guest.name} (${guest.group}). They are in the lounge, unseated.`,
+          [guest.id],
+          `Added ${guest.name} to the guest list.`,
+        )
       },
     ),
     makeTool(
@@ -620,6 +682,7 @@ function baseTools(): WebTool[] {
         return ok(
           `Imported ${added.length} guest${added.length === 1 ? '' : 's'}${skipped ? ` (${skipped} skipped as duplicates or blank)` : ''}. They are waiting in the lounge.`,
           added.map((g) => g.id),
+          `Imported ${added.length} guest${added.length === 1 ? '' : 's'} into the lounge.`,
         )
       },
     ),
@@ -645,8 +708,8 @@ function baseTools(): WebTool[] {
           const dimensions = getCore().venueDimensions
           const units = stageUnitsPerFoot(dimensions)
           const room = roomRect(dimensions)
-          let x = typeof args.x_ft === 'number' ? room.x + args.x_ft * units.x : room.x + room.w / 2
-          let y = typeof args.y_ft === 'number' ? room.y + args.y_ft * units.y : room.y + room.h / 2
+          const x = typeof args.x_ft === 'number' ? room.x + args.x_ft * units.x : room.x + room.w / 2
+          const y = typeof args.y_ft === 'number' ? room.y + args.y_ft * units.y : room.y + room.h / 2
           const probe: Table = {
             id: 'probe',
             name: '',
@@ -656,19 +719,18 @@ function baseTools(): WebTool[] {
             x,
             y,
           }
-          const bounds = tableBodyBounds(probe, dimensions)
-          x += Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
-          y += Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
-          fields.x = x
-          fields.y = y
+          const { dx, dy } = containDelta(tableBounds(probe, dimensions), room)
+          fields.x = x + dx
+          fields.y = y + dy
         }
         const table = useStore.getState().addTable(fields)
         const dimensions = getCore().venueDimensions
         const units = stageUnitsPerFoot(dimensions)
         const room = roomRect(dimensions)
         return ok(
-          `Added ${table.name} (${table.shape}, ${table.seats} seats), centered at (${formatFeet((table.x - room.x) / units.x)}, ${formatFeet((table.y - room.y) / units.y)})${table.rotation ? `, rotated ${Math.round(table.rotation)}°` : ''}.${overlapWarning(getCore(), [table.id])}`,
+          `Added ${table.name} (${table.shape}, ${table.seats} seats), centered at (${formatFeet((table.x - room.x) / units.x)}, ${formatFeet((table.y - room.y) / units.y)})${table.rotation ? `, rotated ${Math.round(table.rotation)}°` : ''}.${layoutWarning(getCore(), [table.id])}`,
           [table.id],
+          `Added ${table.name} — ${table.shape === 'round' ? 'round' : 'rectangular'}, ${table.seats} seats.`,
         )
       },
     ),
@@ -705,6 +767,7 @@ function baseTools(): WebTool[] {
           return ok(
             `Rule added [${c.id}]: ${constraintText(getCore(), c)}.${status === 'violated' ? ' It is currently VIOLATED — auto_arrange(mode:"repair") can fix it.' : ''}`,
             [ra.hit.id, rb.hit.id],
+            `New rule: ${constraintText(getCore(), c)}.`,
           )
         }
         const zoneDup = findDuplicateRule(state, {
@@ -725,6 +788,7 @@ function baseTools(): WebTool[] {
         return ok(
           `Rule added [${c.id}]: ${constraintText(getCore(), c)}.${status === 'violated' ? ' It is currently VIOLATED — auto_arrange(mode:"repair") can fix it.' : ''}`,
           [ra.hit.id],
+          `New rule: ${constraintText(getCore(), c)}.`,
         )
       },
     ),
@@ -784,6 +848,8 @@ function baseTools(): WebTool[] {
         const seated = attending.filter((id) => state.seating[id])
         return ok(
           `Checkpoint “${name}” saved: ${seated.length} of ${attending.length} seated across ${state.tableOrder.length} tables, ${computeViolations(state).length} violations. restore_checkpoint returns to exactly this state.`,
+          undefined,
+          `Saved a checkpoint of the chart (“${name}”).`,
         )
       },
     ),
@@ -812,6 +878,7 @@ function baseTools(): WebTool[] {
         return ok(
           `Restored checkpoint “${name}” (saved ${age} ago). ${moved.length} guest${moved.length === 1 ? '' : 's'} changed seats; undo brings back what was there before the restore.`,
           moved,
+          `Restored the chart to the “${name}” checkpoint.`,
         )
       },
     ),
@@ -823,7 +890,19 @@ function baseTools(): WebTool[] {
         useStore.getState().loadSample(SAMPLE)
         return ok(
           'Sample wedding loaded: 72 guests, 10 tables (84 seats), 17 rules. Everyone is in the lounge — auto_arrange will seat them.',
+          undefined,
+          'Loaded the sample wedding — 72 guests, 10 tables, 17 rules.',
         )
+      },
+    ),
+    makeTool(
+      'wrap_up',
+      'Call once you have finished the human\'s request. Give a one-or-two-sentence closing summary of what changed, e.g. "Everyone is seated and both feuds are resolved." Your cursor announces it and steps off the canvas until the next request. Optional — the cursor also retires on its own after a quiet minute — but it gives the session a clean ending.',
+      obj({ summary: str('What you accomplished, in one or two short sentences') }, ['summary']),
+      (args) => {
+        const summary = String(args.summary ?? '').trim()
+        if (!summary) return fail('Give a short closing summary.')
+        return { text: `Wrapped up — the human sees: “${summary}”`, log: summary, say: summary, endSession: true }
       },
     ),
   ]
@@ -869,12 +948,10 @@ function seatingTools(): WebTool[] {
           const dimensions = getCore().venueDimensions
           const units = stageUnitsPerFoot(dimensions)
           const room = roomRect(dimensions)
-          let x = typeof args.x_ft === 'number' ? room.x + args.x_ft * units.x : after.x
-          let y = typeof args.y_ft === 'number' ? room.y + args.y_ft * units.y : after.y
-          const bounds = tableBodyBounds({ ...after, x, y }, dimensions)
-          x += Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
-          y += Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
-          useStore.getState().moveTable(r.hit.id, x, y)
+          const x = typeof args.x_ft === 'number' ? room.x + args.x_ft * units.x : after.x
+          const y = typeof args.y_ft === 'number' ? room.y + args.y_ft * units.y : after.y
+          const { dx, dy } = containDelta(tableBounds({ ...after, x, y }, dimensions), room)
+          useStore.getState().moveTable(r.hit.id, x + dx, y + dy)
           after = getCore().tables[r.hit.id]
         }
         const dimensions = getCore().venueDimensions
@@ -884,8 +961,16 @@ function seatingTools(): WebTool[] {
         if (unseated.length) {
           text += ` ${unseated.map((id) => state.guests[id]?.name).join(', ')} lost their seat${unseated.length === 1 ? '' : 's'} and moved to the lounge.`
         }
-        text += overlapWarning(getCore(), [r.hit.id])
-        return ok(text, [r.hit.id, ...unseated])
+        text += layoutWarning(getCore(), [r.hit.id])
+        const did: string[] = []
+        if (args.name) did.push('renamed')
+        if (typeof args.seats === 'number') did.push('resized')
+        if (args.shape === 'round' || args.shape === 'rect') did.push('reshaped')
+        if (typeof args.rotation === 'number') did.push('rotated')
+        if (hasPosition) did.push('moved')
+        let log = `${cap(joinWords(did.length ? did : ['adjusted']))} ${after.name}.`
+        if (unseated.length) log += ` ${unseated.length} guest${unseated.length === 1 ? '' : 's'} went back to the lounge.`
+        return ok(text, [r.hit.id, ...unseated], log)
       },
     ),
     makeTool(
@@ -900,6 +985,7 @@ function seatingTools(): WebTool[] {
         return ok(
           `Removed ${r.hit.name}.${unseated.length ? ` ${unseated.length} guest${unseated.length === 1 ? '' : 's'} moved to the lounge: ${unseated.map((id) => state.guests[id]?.name).join(', ')}.` : ''}`,
           unseated,
+          `Removed ${r.hit.name}.${unseated.length ? ` ${unseated.length} guest${unseated.length === 1 ? '' : 's'} went back to the lounge.` : ''}`,
         )
       },
     ),
@@ -927,7 +1013,7 @@ function seatingTools(): WebTool[] {
         )
         let text = `${rg.hit.name} is now at ${rt.hit.name}.`
         if (violations.length) text += ` Heads-up: ${violations.map((v) => v.text).join('; ')}.`
-        return ok(text, [rg.hit.id, rt.hit.id])
+        return ok(text, [rg.hit.id, rt.hit.id], `Seated ${rg.hit.name} at ${rt.hit.name}.`)
       },
     ),
     makeTool(
@@ -957,7 +1043,11 @@ function seatingTools(): WebTool[] {
         useStore.getState().swapGuests(ra.hit.id, rb.hit.id)
         const after = getCore()
         const where = (id: string) => (after.seating[id] ? after.tables[after.seating[id].tableId].name : 'the lounge')
-        return ok(`Swapped: ${ra.hit.name} is now at ${where(ra.hit.id)}, ${rb.hit.name} at ${where(rb.hit.id)}.`, [ra.hit.id, rb.hit.id])
+        return ok(
+          `Swapped: ${ra.hit.name} is now at ${where(ra.hit.id)}, ${rb.hit.name} at ${where(rb.hit.id)}.`,
+          [ra.hit.id, rb.hit.id],
+          `Swapped ${ra.hit.name} and ${rb.hit.name}.`,
+        )
       },
     ),
     makeTool(
@@ -978,7 +1068,15 @@ function seatingTools(): WebTool[] {
           (id) => (before[id]?.tableId ?? '') !== (result.assignments[id]?.tableId ?? ''),
         )
         const tables = new Set(touched.map((id) => result.assignments[id]?.tableId).filter(Boolean) as string[])
-        return ok(result.explanation, [...touched, ...tables])
+        const seatedCount = Object.keys(result.assignments).length
+        const tableCount = new Set(Object.values(result.assignments).map((a) => a.tableId)).size
+        return ok(
+          result.explanation,
+          [...touched, ...tables],
+          mode === 'repair'
+            ? `Repaired the seating — moved ${touched.length} guest${touched.length === 1 ? '' : 's'}.`
+            : `Seated the room — ${seatedCount} guests across ${tableCount} tables.`,
+        )
       },
     ),
     makeTool(
@@ -1017,6 +1115,7 @@ function seatingTools(): WebTool[] {
           ...ok(
             `Proposed to the human (${touched.length} move${touched.length === 1 ? '' : 's'}, awaiting their Keep/Revert):\n${result.explanation}`,
             [...touched, ...tables],
+            `Proposed ${mode === 'repair' ? 'a repair' : 'a fresh arrangement'} — ${touched.length} move${touched.length === 1 ? '' : 's'}, awaiting the verdict.`,
           ),
           finish: () =>
             waitForProposalDecision(id, PROPOSAL_WAIT_MS).then((decision) => {
@@ -1038,7 +1137,11 @@ function seatingTools(): WebTool[] {
         const seatedCount = Object.keys(state.seating).length
         if (seatedCount === 0) return ok('Nobody is seated; nothing to clear.')
         useStore.getState().clearSeating()
-        return ok(`Cleared ${seatedCount} seat assignment${seatedCount === 1 ? '' : 's'}. Everyone is in the lounge.`)
+        return ok(
+          `Cleared ${seatedCount} seat assignment${seatedCount === 1 ? '' : 's'}. Everyone is in the lounge.`,
+          undefined,
+          'Cleared the seating — everyone is back in the lounge.',
+        )
       },
     ),
     makeTool(
@@ -1150,7 +1253,7 @@ function exportTools(): WebTool[] {
         if (model.stats.unseated > 0) text += ` Note: ${model.stats.unseated} attending guest${model.stats.unseated === 1 ? ' is' : 's are'} unseated and will print under “Not yet seated” — auto_arrange can fix that first.`
         const violations = computeViolations(state)
         if (violations.length > 0) text += ` ⚠ ${violations.length} seating rule${violations.length === 1 ? ' is' : 's are'} still broken; the document prints as-is.`
-        return ok(text)
+        return ok(text, undefined, `Prepared the printable seating document — ${model.pages.length} page${model.pages.length === 1 ? '' : 's'}.`)
       },
     ),
     makeTool(
@@ -1204,7 +1307,11 @@ function finalizeTools(): WebTool[] {
         const conflictNote = conflicts.length
           ? `\n\nNote: the floor plan still has overlapping furniture — ${conflicts.join('; ')}. Consider fixing with update_table / update_venue.`
           : ''
-        return ok(`Chart finalized and locked in. 🥂\n\n${lines.join('\n')}${conflictNote}`)
+        return ok(
+          `Chart finalized and locked in. 🥂\n\n${lines.join('\n')}${conflictNote}`,
+          undefined,
+          'Finalized the chart — every guest seated, zero drama. 🥂',
+        )
       },
     ),
   ]

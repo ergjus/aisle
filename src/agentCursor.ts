@@ -150,6 +150,17 @@ export function sessionRemainingMs(): number {
   return Math.max(0, sessionUntil - Date.now())
 }
 
+/**
+ * The agent said it is finished (wrap_up): end the session as soon as the
+ * queued performances have played, instead of waiting out the idle window.
+ * Call only after any farewell glance is already enqueued — the wake makes
+ * the cursor play what is queued and then bow out.
+ */
+export function endAgentSession(): void {
+  sessionUntil = 0
+  wake?.()
+}
+
 // ---- chip departure delays --------------------------------------------------
 
 // When the cursor is on its way to pick a chip up, the chip's CSS transition
@@ -332,9 +343,10 @@ export function choreograph(opts: {
 }
 
 /** A label-only beat where the cursor stands (materializing it if needed) —
- *  read-only tools narrate through this, so thinking is visible too. */
-export function glance(label: string): void {
-  void enqueuePerformance({
+ *  read-only tools and narration speak through this, so thinking is visible
+ *  too. Resolves when the beat has played. */
+export function glance(label: string): Promise<void> {
+  return enqueuePerformance({
     steps: [{ x: 0, y: 0, stay: true, label, gesture: 'point', holdMs: 1200 }],
   })
 }

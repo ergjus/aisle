@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, Plus } from 'lucide-react'
 import { useStore } from '../store'
 import { groupColors, parseGuestEntries } from '../utils'
+import { SPREADSHEET_ACCEPT, SpreadsheetError, readSpreadsheet } from '../import/spreadsheet'
 import { constraintStatus, constraintText, findDuplicateRule, zoneLabel, zoneNoun, type RuleDraft } from '../constraints'
-import { feetSize, formatFeet } from '../geometry'
-import type { Constraint, VenueFeatureId, ZoneId } from '../types'
+import { feetSize, formatFeet, tableSize } from '../geometry'
+import type { Constraint, TableShape, VenueFeatureId, ZoneId } from '../types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -70,11 +71,11 @@ function usePersistedJSON<T extends Record<string, unknown>>(key: string, fallba
   return [value, set] as const
 }
 
-type SectionId = 'venue' | 'guests' | 'activity' | 'rules'
+type SectionId = 'venue' | 'tables' | 'guests' | 'activity' | 'rules'
 
 /** Starting share of the sidebar's leftover height for each section, and the floor it can't be dragged below. */
-const DEFAULT_WEIGHTS: Record<SectionId, number> = { venue: 230, guests: 300, activity: 180, rules: 180 }
-const MIN_HEIGHTS: Record<SectionId, number> = { venue: 190, guests: 160, activity: 110, rules: 110 }
+const DEFAULT_WEIGHTS: Record<SectionId, number> = { venue: 210, tables: 230, guests: 300, activity: 180, rules: 180 }
+const MIN_HEIGHTS: Record<SectionId, number> = { venue: 180, tables: 170, guests: 160, activity: 110, rules: 110 }
 
 function Section(props: {
   id: SectionId
@@ -304,6 +305,166 @@ function VenueSection() {
   )
 }
 
+// ---- tables -----------------------------------------------------------------
+
+const TABLE_SHAPE_ITEMS = [
+  { value: 'round', label: 'Round' },
+  { value: 'rect', label: 'Banquet' },
+]
+
+/**
+ * Where tables get added by hand. The composer holds the shape and seat count
+ * you keep reaching for, so adding a room's worth is one repeated click, and
+ * the store finds each new table a clear patch of floor.
+ */
+function TablesSection() {
+  const s = useStore()
+  const [shape, setShape] = useState<TableShape>('round')
+  const [seats, setSeats] = useState(8)
+
+  const attending = s.guestOrder.filter((id) => s.guests[id].rsvp !== 'no').length
+  const capacity = s.tableOrder.reduce((sum, id) => sum + s.tables[id].seats, 0)
+  const shortfall = Math.max(0, attending - capacity)
+
+  const shapeWord = shape === 'round' ? 'round' : 'banquet'
+
+  const add = () => {
+    const table = s.addTable({ shape, seats })
+    s.logActivity('add table', `Added ${table.name} (${shapeWord}, ${table.seats} seats).`, 'you')
+  }
+
+  /** Enough tables to seat everyone still short of a chair, as one undoable step. */
+  const addForShortfall = () => {
+    const needed = Math.ceil(shortfall / seats)
+    s.snapshot('add tables')
+    for (let i = 0; i < needed; i++) s.addTable({ shape, seats }, { snapshot: false })
+    s.logActivity(
+      'add table',
+      `Added ${needed} ${shapeWord} table${needed === 1 ? '' : 's'} to seat everyone.`,
+      'you',
+    )
+    s.setToast(`Added ${needed} table${needed === 1 ? '' : 's'}.`)
+  }
+
+  return (
+    <>
+      <div className="sticky top-0 z-10 -mx-1 mb-1 bg-ivory px-1 pt-1 pb-2">
+        <div className="flex flex-col gap-1.5 rounded-lg border bg-parchment/70 p-2">
+          <div className="flex items-center gap-1.5">
+            <span className="shrink-0 pl-0.5 text-[10.5px] font-bold tracking-[0.1em] text-ink-soft uppercase">
+              Shape
+            </span>
+            <Select
+              items={TABLE_SHAPE_ITEMS}
+              value={shape}
+              onValueChange={(v) => v !== null && setShape(v as TableShape)}
+            >
+              <SelectTrigger className="min-w-0 flex-1" size="sm" aria-label="Shape for the new table">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TABLE_SHAPE_ITEMS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="shrink-0 pl-0.5 text-[10.5px] font-bold tracking-[0.1em] text-ink-soft uppercase">
+              Seats
+            </span>
+            <div className="flex flex-1 items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="One seat fewer"
+                disabled={seats <= 2}
+                onClick={() => setSeats((n) => Math.max(2, n - 1))}
+              >
+                −
+              </Button>
+              <span className="min-w-5 text-center text-[13px] font-bold">{seats}</span>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="One seat more"
+                disabled={seats >= 16}
+                onClick={() => setSeats((n) => Math.min(16, n + 1))}
+              >
+                +
+              </Button>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={add}>
+            <Plus className="h-3 w-3 shrink-0" aria-hidden="true" />
+            Add Table
+          </Button>
+          {shortfall > 0 && (
+            <Button variant="ghost" size="xs" onClick={addForShortfall}>
+              {shortfall} guest{shortfall === 1 ? '' : 's'} without a seat — add {Math.ceil(shortfall / seats)} more
+            </Button>
+          )}
+        </div>
+        {s.tableOrder.length > 0 && (
+          <p className="mt-1.5 px-1 text-xs font-bold">
+            <span className={cn(shortfall > 0 ? 'text-brick' : 'text-sage')}>
+              {capacity} seat{capacity === 1 ? '' : 's'}
+            </span>
+            <span className="text-ink-faint"> · {attending} attending</span>
+          </p>
+        )}
+      </div>
+      {s.tableOrder.length === 0 && (
+        <p className="my-1.5 px-1 text-[12.5px] text-ink-soft">
+          No tables yet. Add one above — or ask your agent for “ten rounds of eight”.
+        </p>
+      )}
+      {s.tableOrder.map((id) => {
+        const t = s.tables[id]
+        const occ = Object.values(s.seating).filter((a) => a.tableId === id).length
+        const footprint = tableSize(t, s.venueDimensions)
+        const size = feetSize(footprint.w, footprint.h, s.venueDimensions)
+        return (
+          <div key={id} className="group flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent">
+            <button
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              onClick={(e) => s.setSelection({ kind: 'table', id, at: { x: e.clientX + 12, y: e.clientY - 10 } })}
+            >
+              <span
+                className={cn(
+                  'h-3 w-3 shrink-0 border border-ink-faint',
+                  t.shape === 'round' ? 'rounded-full' : 'rounded-[2px]',
+                )}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{t.name}</span>
+              <span className="text-[10px] whitespace-nowrap text-ink-faint">
+                {formatFeet(size.w)} × {formatFeet(size.h)}
+              </span>
+              <span className={cn('text-[11px] whitespace-nowrap', occ > t.seats ? 'text-brick' : 'text-ink-faint')}>
+                {occ}/{t.seats}
+              </span>
+            </button>
+            <button
+              className="shrink-0 px-1 text-[15px] leading-none text-ink-faint opacity-0 group-hover:opacity-100 hover:text-brick"
+              title={`Remove ${t.name}`}
+              aria-label={`Remove ${t.name}`}
+              onClick={() => {
+                s.logActivity('remove table', `Removed ${t.name}.`, 'you')
+                s.removeTable(id)
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
 // ---- guests ----------------------------------------------------------------
 
 function GroupBlock(props: {
@@ -394,6 +555,7 @@ function GuestsSection() {
   const [importText, setImportText] = useState('')
   const [showNewGroup, setShowNewGroup] = useState(false)
   const [showListGroup, setShowListGroup] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const NEW_GROUP = '__new_group__'
 
@@ -446,6 +608,30 @@ function GuestsSection() {
     setShowImport(false)
   }
 
+  // A spreadsheet is where guest lists actually live, so the file goes
+  // straight in: the sheet's own header row decides which column is which,
+  // and the composer's group only fills in rows that name none.
+  const runFileImport = async (file: File) => {
+    try {
+      const sheet = await readSpreadsheet(file, activeGroup)
+      if (sheet.entries.length === 0) {
+        s.setToast(`No guest names found in ${file.name}.`)
+        return
+      }
+      const added = s.importGuests(sheet.entries)
+      const skipped = sheet.entries.length - added.length
+      const detail = skipped > 0 ? ` (${skipped} already on the list)` : ''
+      s.setToast(`Imported ${added.length} guest${added.length === 1 ? '' : 's'} from ${file.name}${detail}.`)
+      s.logActivity(
+        'import guests',
+        `Imported ${added.length} guest${added.length === 1 ? '' : 's'} from ${file.name}${detail}.`,
+        'you',
+      )
+    } catch (error) {
+      s.setToast(error instanceof SpreadsheetError ? error.message : `${file.name} could not be imported.`)
+    }
+  }
+
   return (
     <>
       {/* Pinned: the composer and the search box stay put while the list under
@@ -495,9 +681,27 @@ function GuestsSection() {
         {showNewGroup && (
           <NewGroupRow onCreated={(g) => setGroup(g)} onClose={() => setShowNewGroup(false)} />
         )}
-        <Button variant="ghost" size="xs" onClick={() => setShowImport((v) => !v)}>
-          {showImport ? 'Hide Paste Box' : 'Paste a List…'}
-        </Button>
+        <div className="flex flex-col gap-0.5">
+          <Button variant="ghost" size="xs" onClick={() => fileRef.current?.click()}>
+            Import a Spreadsheet…
+          </Button>
+          <Button variant="ghost" size="xs" onClick={() => setShowImport((v) => !v)}>
+            {showImport ? 'Hide Paste Box' : 'Paste a List…'}
+          </Button>
+          <input
+            ref={fileRef}
+            type="file"
+            className="hidden"
+            accept={SPREADSHEET_ACCEPT}
+            aria-label="Guest list spreadsheet"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              // Reset first, so picking the same file twice still fires.
+              e.target.value = ''
+              if (file) void runFileImport(file)
+            }}
+          />
+        </div>
         {showImport && (
           <div className="flex flex-col gap-1.5">
             <Textarea
@@ -614,25 +818,23 @@ function ActivitySection() {
           Every step lands here — yours and your agent's. Seat someone, or ask your agent to arrange the room.
         </p>
       )}
-      <div className="flex flex-col gap-2 pr-0.5">
+      {/* A quiet ledger rather than a stack of cards: hairline rail, a marker
+          per entry (gold = agent, open = you), the sentence itself as the
+          content, and one faint who·when line beneath. */}
+      <div className="ml-[5px] flex flex-col border-l border-ink-faint/25 pr-0.5">
         {s.agentLog.map((e) => (
-          <div
-            key={e.id}
-            className={cn(
-              'animate-in fade-in slide-in-from-top-1 rounded-md border border-l-[3px] bg-parchment/70 px-2.5 py-1.5',
-              e.source === 'you' ? 'border-l-ink-faint' : 'border-l-gold',
-            )}
-          >
-            <div
+          <div key={e.id} className="animate-in fade-in slide-in-from-top-1 relative py-[5px] pl-3.5">
+            <span
+              aria-hidden="true"
               className={cn(
-                'text-[10.5px] font-bold tracking-[0.1em] uppercase',
-                e.source === 'you' ? 'text-ink-soft' : 'text-gold-ink',
+                'absolute top-[10px] -left-[4px] h-[7px] w-[7px] rounded-full border',
+                e.source === 'you' ? 'border-ink-faint bg-parchment' : 'border-gold-ink/60 bg-gold',
               )}
-            >
-              {e.source === 'you' ? 'You' : 'Agent'} · {e.tool}
+            />
+            <div className="text-[12.5px] leading-snug text-ink">{e.summary}</div>
+            <div className="mt-px text-[10.5px] text-ink-faint">
+              {e.source === 'you' ? 'You' : 'Agent'} · {timeAgo(e.time)}
             </div>
-            <div className="text-[12.5px] whitespace-pre-wrap">{e.summary}</div>
-            <div className="text-[10.5px] text-ink-faint">{timeAgo(e.time)}</div>
           </div>
         ))}
       </div>
@@ -900,6 +1102,7 @@ export function Sidebar() {
 
   const [open, setOpenMap] = usePersistedJSON<Record<SectionId, boolean>>('aisle:sidebar:open', {
     venue: true,
+    tables: true,
     guests: true,
     activity: true,
     rules: false,
@@ -929,7 +1132,19 @@ export function Sidebar() {
       >
         <VenueSection />
       </Section>
-      <ResizeHandle above="venue" below="guests" active={open.venue && open.guests} weights={weights} setWeights={setWeights} />
+      <ResizeHandle above="venue" below="tables" active={open.venue && open.tables} weights={weights} setWeights={setWeights} />
+      <Section
+        id="tables"
+        title="Tables"
+        count={s.tableOrder.length}
+        open={open.tables}
+        onOpenChange={(v) => setOpen('tables', v)}
+        minHeight={MIN_HEIGHTS.tables}
+        weight={weights.tables}
+      >
+        <TablesSection />
+      </Section>
+      <ResizeHandle above="tables" below="guests" active={open.tables && open.guests} weights={weights} setWeights={setWeights} />
       <Section
         id="guests"
         title="Guests"

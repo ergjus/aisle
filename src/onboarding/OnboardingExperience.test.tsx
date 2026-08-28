@@ -137,6 +137,7 @@ describe('personalized first-run dialog', () => {
     await user.click(screen.getByRole('button', { name: /Finish/i }))
 
     await waitFor(() => expect(screen.getByText('The room is ready')).toBeVisible())
+    expect(screen.getByRole('dialog')).toHaveAttribute('data-fullscreen', 'true')
     expect(screen.getByRole('dialog')).toHaveAttribute('data-reduced-motion', 'true')
     expect(document.querySelector('.welcome-sparkles')).not.toBeInTheDocument()
     expect(getCore().guestOrder).toHaveLength(72)

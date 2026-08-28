@@ -1,12 +1,16 @@
 import {
   DEFAULT_VENUE,
   DEFAULT_VENUE_DIMENSIONS,
-  boundsOverlap,
+  WALL_MARGIN,
   featureBounds,
+  featureFootprint,
+  footprintGap,
+  footprintsOverlap,
+  ft,
   layoutConflicts,
   roomRect,
-  stageUnitsPerFoot,
   tableBounds,
+  tableFootprint,
 } from '../geometry'
 import { SAMPLE_CONSTRAINTS, SAMPLE_GUESTS } from '../sample'
 import type {
@@ -38,23 +42,32 @@ export interface VenuePresetDefaults {
   amenities: VenueFeatureId[]
 }
 
+/**
+ * Room sizes are the real thing a venue of that kind books for this guest
+ * list, with enough floor that every amenity on the next question still fits
+ * — the defaults should never come back asking for a bigger room.
+ */
 export const VENUE_PRESET_DEFAULTS: Record<VenuePreset, VenuePresetDefaults> = {
   ballroom: {
-    widthFt: 60,
-    lengthFt: 33,
+    widthFt: DEFAULT_VENUE_DIMENSIONS.widthFt,
+    lengthFt: DEFAULT_VENUE_DIMENSIONS.lengthFt,
     amenities: ['entrance', 'dance_floor', 'band', 'bathroom'],
   },
   garden_tent: {
-    widthFt: 80,
-    lengthFt: 50,
+    widthFt: 90,
+    lengthFt: 60,
     amenities: ['entrance', 'dance_floor', 'band', 'bathroom', 'bar', 'buffet'],
   },
   restaurant: {
-    widthFt: 45,
-    lengthFt: 28,
+    widthFt: 62,
+    lengthFt: 42,
     amenities: ['entrance', 'bathroom', 'bar'],
   },
-  custom: { widthFt: 60, lengthFt: 33, amenities: [] },
+  custom: {
+    widthFt: DEFAULT_VENUE_DIMENSIONS.widthFt,
+    lengthFt: DEFAULT_VENUE_DIMENSIONS.lengthFt,
+    amenities: [],
+  },
 }
 
 export function expandVenuePreset(preset: VenuePreset): VenuePresetDefaults {
@@ -135,37 +148,19 @@ export function buildTablePlan(config: PersonalizedDemoConfig): Table[] {
   return tables
 }
 
-function reprojectFeature(feature: VenueFeature, dimensions: VenueDimensions): VenueFeature {
-  const sourceRoom = roomRect(DEFAULT_VENUE_DIMENSIONS)
-  const sourceUnits = stageUnitsPerFoot(DEFAULT_VENUE_DIMENSIONS)
-  const nextRoom = roomRect(dimensions)
-  const nextUnits = stageUnitsPerFoot(dimensions)
-  return {
-    ...feature,
-    x: nextRoom.x + ((feature.x - sourceRoom.x) / sourceUnits.x) * nextUnits.x,
-    y: nextRoom.y + ((feature.y - sourceRoom.y) / sourceUnits.y) * nextUnits.y,
-    w: (feature.w / sourceUnits.x) * nextUnits.x,
-    h: (feature.h / sourceUnits.y) * nextUnits.y,
-  }
-}
+/** Aisle left between two amenities so they read as separate pieces. */
+const AMENITY_GAP = ft(0.25)
+/** Clear floor kept between a table's chairs and its neighbours. */
+const TABLE_CLEARANCE = ft(0.2)
 
-function hasGap(
-  a: ReturnType<typeof featureBounds>,
-  b: ReturnType<typeof featureBounds>,
-  gap = 5,
-): boolean {
-  return !(
-    a.left - gap < b.right &&
-    a.right + gap > b.left &&
-    a.top - gap < b.bottom &&
-    a.bottom + gap > b.top
-  )
+function hasGap(a: VenueFeature, b: VenueFeature, gap = AMENITY_GAP): boolean {
+  return footprintGap(featureFootprint(a), featureFootprint(b)) >= gap
 }
 
 function insideRoom(
   bounds: ReturnType<typeof featureBounds>,
   room: ReturnType<typeof roomRect>,
-  margin = 7,
+  margin = WALL_MARGIN,
 ): boolean {
   return (
     bounds.left >= room.x + margin &&
@@ -189,10 +184,10 @@ const FEATURE_PLACEMENT_ORDER: VenueFeatureId[] = [
 
 function featureCandidates(feature: VenueFeature, dimensions: VenueDimensions): VenueFeature[] {
   const room = roomRect(dimensions)
-  const step = Math.max(8, Math.min(20, Math.min(room.w / 35, room.h / 24)))
+  const step = Math.max(ft(0.4), Math.min(ft(1), Math.min(room.w / 35, room.h / 24)))
   const candidates: VenueFeature[] = [feature]
-  for (let y = room.y + 8; y <= room.y + room.h - feature.h - 8; y += step) {
-    for (let x = room.x + 8; x <= room.x + room.w - feature.w - 8; x += step) {
+  for (let y = room.y + WALL_MARGIN; y <= room.y + room.h - feature.h - WALL_MARGIN; y += step) {
+    for (let x = room.x + WALL_MARGIN; x <= room.x + room.w - feature.w - WALL_MARGIN; x += step) {
       candidates.push({ ...feature, x, y })
     }
   }
@@ -209,11 +204,10 @@ function placeVenueFeatures(
   enabledIds: VenueFeatureId[],
 ): Record<VenueFeatureId, VenueFeature> | null {
   const enabled = new Set(enabledIds)
+  // Amenities keep their real-world footprint whatever the room's size — the
+  // floor plan is drawn at a fixed scale, so only their placement is planned.
   const venue = Object.fromEntries(
-    VENUE_FEATURE_IDS.map((id) => {
-      const projected = reprojectFeature(DEFAULT_VENUE[id], dimensions)
-      return [id, { ...projected, enabled: enabled.has(id) }]
-    }),
+    VENUE_FEATURE_IDS.map((id) => [id, { ...DEFAULT_VENUE[id], enabled: enabled.has(id) }]),
   ) as Record<VenueFeatureId, VenueFeature>
   const room = roomRect(dimensions)
   const placed: VenueFeature[] = []
@@ -221,10 +215,9 @@ function placeVenueFeatures(
   for (const id of FEATURE_PLACEMENT_ORDER) {
     if (!enabled.has(id)) continue
     const projected = venue[id]
-    if (projected.w > room.w - 16 || projected.h > room.h - 16) return null
+    if (projected.w > room.w - WALL_MARGIN * 2 || projected.h > room.h - WALL_MARGIN * 2) return null
     const candidate = featureCandidates(projected, dimensions).find((next) => {
-      const bounds = featureBounds(next)
-      return insideRoom(bounds, room) && placed.every((other) => hasGap(bounds, featureBounds(other)))
+      return insideRoom(featureBounds(next), room) && placed.every((other) => hasGap(next, other))
     })
     if (!candidate) return null
     venue[id] = candidate
@@ -244,11 +237,11 @@ function tableCandidates(
   const atOrigin = tableBounds({ ...table, x: 0, y: 0 }, dimensions)
   const halfX = Math.max(Math.abs(atOrigin.left), Math.abs(atOrigin.right))
   const halfY = Math.max(Math.abs(atOrigin.top), Math.abs(atOrigin.bottom))
-  const step = Math.max(8, Math.min(18, Math.min(room.w / 48, room.h / 32)))
+  const step = Math.max(ft(0.4), Math.min(ft(0.9), Math.min(room.w / 48, room.h / 32)))
   const xs: number[] = []
   const ys: number[] = []
-  for (let x = room.x + halfX + 8; x <= room.x + room.w - halfX - 8; x += step) xs.push(x)
-  for (let y = room.y + halfY + 8; y <= room.y + room.h - halfY - 8; y += step) ys.push(y)
+  for (let x = room.x + halfX + WALL_MARGIN; x <= room.x + room.w - halfX - WALL_MARGIN; x += step) xs.push(x)
+  for (let y = room.y + halfY + WALL_MARGIN; y <= room.y + room.h - halfY - WALL_MARGIN; y += step) ys.push(y)
   if (pattern.endsWith('reverse')) xs.reverse()
   const coordinates: { x: number; y: number }[] = []
   if (pattern.startsWith('columns')) {
@@ -287,10 +280,10 @@ function placeTables(
         ))
       }
       const candidate = candidates.find((next) => {
-        const bounds = tableBounds(next, dimensions)
-        if (!insideRoom(bounds, room)) return false
-        if (enabledFeatures.some((feature) => boundsOverlap(bounds, featureBounds(feature), -4))) return false
-        return placed.every((table) => !boundsOverlap(bounds, tableBounds(table, dimensions), -4))
+        if (!insideRoom(tableBounds(next, dimensions), room)) return false
+        const shape = tableFootprint(next, dimensions)
+        if (enabledFeatures.some((feature) => footprintsOverlap(shape, featureFootprint(feature), -TABLE_CLEARANCE))) return false
+        return placed.every((table) => !footprintsOverlap(shape, tableFootprint(table, dimensions), -TABLE_CLEARANCE))
       })
       if (!candidate) {
         failed = true

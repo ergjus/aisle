@@ -188,16 +188,20 @@
 /* ---- first-run welcome and reusable coach marks ------------------------- */
 
 .welcome-dialog {
+  position: fixed;
   z-index: 100;
   inset: 0;
   top: 0;
+  right: 0;
+  bottom: 0;
   left: 0;
+  margin: 0;
   width: 100vw;
   height: 100dvh;
   max-width: none;
   max-height: none;
-  translate: none;
-  transform: none;
+  translate: none !important;
+  transform: none !important;
   overflow: hidden;
   border-radius: 0;
   padding: 0;
@@ -218,8 +222,10 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  justify-content: safe center;
   gap: 18px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 40px 0;
   text-align: center;
 }
@@ -363,6 +369,7 @@
 
 .welcome-card [data-slot='card-footer'] {
   position: sticky;
+  z-index: 2;
   bottom: calc(-1 * var(--card-spacing));
   background: linear-gradient(transparent, var(--color-card) 20%);
   padding-top: var(--card-spacing);
@@ -452,6 +459,61 @@
   .welcome-card { max-height: calc(100dvh - 24px); }
   .welcome-coach { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
   .welcome-coach-top { top: 66px; bottom: auto; }
+}
+
+@media (max-width: 480px) {
+  .welcome-card [data-slot='card-header'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+  }
+
+  .welcome-card [data-slot='card-action'] {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+  }
+
+  .welcome-card [data-slot='questionnaire-title'] {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .welcome-card [data-slot='questionnaire-description'] {
+    grid-column: 1;
+    grid-row: 3;
+  }
+}
+
+@media (max-height: 650px) and (min-width: 641px) {
+  .welcome-intro,
+  .welcome-reveal {
+    gap: 8px;
+    padding: 16px 0;
+  }
+
+  .welcome-candle {
+    width: 20px;
+    height: 36px;
+  }
+
+  .welcome-candle span {
+    width: 11px;
+    height: 18px;
+  }
+
+  .welcome-intro h2,
+  .welcome-reveal h2 {
+    font-size: clamp(32px, 4vw, 42px);
+  }
+
+  .welcome-deck {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .welcome-sketch {
+    width: min(300px, 45vw);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
