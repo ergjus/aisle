@@ -1095,6 +1095,17 @@ button:focus-visible {
   }
 }
 
+@media (max-width: 900px) {
+  .header {
+    flex-wrap: wrap;
+    gap: 8px 14px;
+  }
+
+  body {
+    overflow-x: hidden;
+  }
+}
+
 @media (max-width: 760px) {
   .main {
     grid-template-columns: minmax(0, 1fr);
