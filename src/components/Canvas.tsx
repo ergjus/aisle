@@ -18,6 +18,7 @@ import { computeViolations } from '../constraints'
 import { groupColors, hashId, initials } from '../utils'
 import { SAMPLE } from '../sample'
 import { seatEveryone } from '../actions'
+import { Button } from '@/components/ui/button'
 
 interface DragState {
   kind: 'chip' | 'table'
@@ -410,24 +411,26 @@ export function Canvas() {
               Add guests and tables by hand, or load the sample wedding — 72 guests, 10 tables, and a healthy amount of
               family politics.
             </p>
-            <button
-              className="btn btn-gold"
-              onClick={() => {
-                s.loadSample(SAMPLE)
-                s.logActivity('load sample', 'Loaded the sample wedding: 72 guests, 10 tables, 17 rules.', 'you')
-              }}
-            >
-              Load Sample Wedding
-            </button>{' '}
-            <button
-              className="btn"
-              onClick={() => {
-                const t = s.addTable()
-                s.logActivity('add table', `Added ${t.name}.`, 'you')
-              }}
-            >
-              Add a Table
-            </button>
+            <div className="flex justify-center gap-2">
+              <Button
+                onClick={() => {
+                  s.loadSample(SAMPLE)
+                  s.logActivity('load sample', 'Loaded the sample wedding: 72 guests, 10 tables, 17 rules.', 'you')
+                }}
+              >
+                Load Sample Wedding
+              </Button>
+              <Button
+                variant="outline"
+                className="border-linen-dim/60 bg-transparent text-linen hover:bg-pine-800 hover:text-linen"
+                onClick={() => {
+                  const t = s.addTable()
+                  s.logActivity('add table', `Added ${t.name}.`, 'you')
+                }}
+              >
+                Add a Table
+              </Button>
+            </div>
           </div>
         )}
       </div>

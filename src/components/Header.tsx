@@ -4,6 +4,8 @@ import { chartMarkdown, downloadText } from '../utils'
 import { SAMPLE } from '../sample'
 import { seatEveryone } from '../actions'
 import { DramaMeter } from './DramaMeter'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 
 export function Header() {
   const s = useStore()
@@ -15,61 +17,63 @@ export function Header() {
   const canArrange = attending.length > 0 && s.tableOrder.length > 0
 
   const badge = s.agentConnected
-    ? { cls: 'mcp-badge agent', text: `Agent at the table · ${s.toolNames.length} tools` }
+    ? { dot: 'bg-gold animate-pulse', text: `Agent at the table · ${s.toolNames.length} tools` }
     : s.webmcpAvailable
-      ? { cls: 'mcp-badge live', text: `WebMCP · ${s.toolNames.length} tools ready` }
-      : { cls: 'mcp-badge', text: 'WebMCP not detected' }
+      ? { dot: 'bg-ok', text: `WebMCP · ${s.toolNames.length} tools ready` }
+      : { dot: 'bg-ink-faint', text: 'WebMCP not detected' }
+
+  const loadSample = () => {
+    s.loadSample(SAMPLE)
+    s.logActivity('load sample', 'Loaded the sample wedding: 72 guests, 10 tables, 17 rules.', 'you')
+  }
 
   return (
-    <header className="header">
-      <div className="brand">
-        <h1>
-          <span className="fleuron">❦</span>Aisle
-        </h1>
-        <span className="tagline">plan the room together</span>
-      </div>
+    <header className="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-b border-hairline bg-ivory px-4 py-2">
+      <h1 className="font-serif text-[28px] leading-none font-semibold tracking-wide">
+        <span className="mr-1 text-[21px] text-gold">❦</span>Aisle
+      </h1>
       <DramaMeter score={score} broken={violations.length} />
-      <div className="header-spacer" />
-      <div className="header-actions">
+      <div className="min-w-2 flex-1" />
+      <div className="flex flex-wrap items-center gap-2">
         <span
-          className={badge.cls}
+          className="inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs font-semibold whitespace-nowrap text-ink-soft"
           title="This page registers its seating tools with your browser via WebMCP (navigator.modelContext), so an AI agent can work the chart with you."
         >
-          <span className="dot" />
+          <span className={cn('h-2 w-2 rounded-full', badge.dot)} />
           {badge.text}
         </span>
-        <button
-          className={empty ? 'btn btn-gold' : 'btn'}
-          onClick={() => {
-            s.loadSample(SAMPLE)
-            s.logActivity('load sample', 'Loaded the sample wedding: 72 guests, 10 tables, 17 rules.', 'you')
-          }}
+        <Button
+          variant={empty ? 'default' : 'outline'}
+          size="sm"
+          onClick={loadSample}
           title="72 guests, 10 tables, 17 seating rules — instant demo wedding"
         >
           Load Sample Wedding
-        </button>
-        <button
-          className={!empty && unseated > 0 && violations.length === 0 ? 'btn btn-gold' : 'btn'}
+        </Button>
+        <Button
+          variant={!empty && unseated > 0 && violations.length === 0 ? 'default' : 'outline'}
+          size="sm"
           onClick={() => seatEveryone('full')}
           disabled={!canArrange}
           title="Arrange the whole room automatically, honoring every rule — the same engine your agent uses"
         >
           Seat Everyone
-        </button>
-        <button className="btn btn-quiet" onClick={() => s.undo()} disabled={s.undoStack.length === 0} title="Undo (⌘Z)">
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => s.undo()} disabled={s.undoStack.length === 0} title="Undo (⌘Z)">
           Undo
-        </button>
-        <button className="btn btn-quiet" onClick={() => s.redo()} disabled={s.redoStack.length === 0} title="Redo (⇧⌘Z)">
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => s.redo()} disabled={s.redoStack.length === 0} title="Redo (⇧⌘Z)">
           Redo
-        </button>
-        <button
-          className="btn"
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => downloadText('seating-chart.md', chartMarkdown(s))}
           disabled={s.guestOrder.length === 0}
           title="Download the chart as a per-table Markdown list with dietary summary"
         >
           Export List
-        </button>
+        </Button>
       </div>
     </header>
   )

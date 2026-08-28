@@ -1,9 +1,8 @@
 import { useEffect } from 'react'
 import { useStore } from './store'
 import { Header } from './components/Header'
-import { GuestPanel } from './components/GuestPanel'
+import { Sidebar } from './components/Sidebar'
 import { Canvas } from './components/Canvas'
-import { RightPanel } from './components/RightPanel'
 import { Editors } from './components/Editors'
 
 export default function App() {
@@ -32,16 +31,19 @@ export default function App() {
   }, [toast, setToast])
 
   return (
-    <div className="app">
+    <div className="grid h-screen grid-rows-[auto_minmax(0,1fr)]">
       <Header />
-      <div className="main">
-        <GuestPanel />
+      <div className="grid min-h-0 grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)]">
+        <Sidebar />
         <Canvas />
-        <RightPanel />
       </div>
       <Editors />
       {toast && (
-        <div className="toast" role="status" aria-live="polite">
+        <div
+          className="animate-in fade-in slide-in-from-bottom-2 fixed bottom-6 left-1/2 z-[80] max-w-[70vw] -translate-x-1/2 rounded-lg border border-gold/50 bg-pine-950/95 px-4 py-2 text-[13px] text-linen"
+          role="status"
+          aria-live="polite"
+        >
           {toast}
         </div>
       )}

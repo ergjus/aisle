@@ -1,13 +1,34 @@
 import { useEffect } from 'react'
 import { useStore, type Selection } from '../store'
 import type { RSVP } from '../types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
-function clampPos(at: { x: number; y: number }, w = 258, h = 340) {
+function clampPos(at: { x: number; y: number }, w = 264, h = 340) {
   return {
     left: Math.max(8, Math.min(at.x, window.innerWidth - w - 12)),
     top: Math.max(8, Math.min(at.y, window.innerHeight - h - 12)),
   }
 }
+
+function Field(props: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="flex min-w-0 flex-1 flex-col gap-1 text-[10.5px] font-bold tracking-[0.1em] text-ink-soft uppercase">
+      {props.label}
+      {props.children}
+    </label>
+  )
+}
+
+const cardCls =
+  'animate-in fade-in zoom-in-95 fixed z-[60] flex w-[264px] flex-col gap-2 rounded-xl border border-input bg-card p-3 shadow-2xl'
 
 function GuestEditor({ sel }: { sel: Selection }) {
   const s = useStore()
@@ -17,33 +38,35 @@ function GuestEditor({ sel }: { sel: Selection }) {
   const groups = [...new Set(s.guestOrder.map((id) => s.guests[id].group))]
 
   return (
-    <div className="editor" style={clampPos(sel.at)}>
-      <h3>{g.name}</h3>
-      <label>
-        Name
-        <input value={g.name} onChange={(e) => s.updateGuest(g.id, { name: e.target.value })} />
-      </label>
-      <div className="row">
-        <label>
-          Group
-          <input
-            value={g.group}
-            list="group-options"
-            onChange={(e) => s.updateGuest(g.id, { group: e.target.value })}
-          />
-        </label>
-        <label>
-          RSVP
-          <select value={g.rsvp} onChange={(e) => s.updateGuest(g.id, { rsvp: e.target.value as RSVP })}>
-            <option value="yes">Yes</option>
-            <option value="pending">Pending</option>
-            <option value="no">No</option>
-          </select>
-        </label>
+    <div className={cardCls} style={clampPos(sel.at)}>
+      <h3 className="font-serif text-lg leading-tight font-semibold">{g.name}</h3>
+      <Field label="Name">
+        <Input value={g.name} onChange={(e) => s.updateGuest(g.id, { name: e.target.value })} />
+      </Field>
+      <div className="flex gap-1.5">
+        <Field label="Group">
+          <Input value={g.group} list="group-options" onChange={(e) => s.updateGuest(g.id, { group: e.target.value })} />
+          <datalist id="group-options">
+            {groups.map((grp) => (
+              <option key={grp} value={grp} />
+            ))}
+          </datalist>
+        </Field>
+        <Field label="RSVP">
+          <Select value={g.rsvp} onValueChange={(v) => s.updateGuest(g.id, { rsvp: v as RSVP })}>
+            <SelectTrigger className="w-full" aria-label="RSVP">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="yes">Yes</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="no">No</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
       </div>
-      <label>
-        Dietary (comma separated)
-        <input
+      <Field label="Dietary (comma separated)">
+        <Input
           value={g.dietary.join(', ')}
           placeholder="vegetarian, nut allergy…"
           onChange={(e) =>
@@ -52,42 +75,43 @@ function GuestEditor({ sel }: { sel: Selection }) {
             })
           }
         />
-      </label>
-      <label>
-        Notes
-        <input
+      </Field>
+      <Field label="Notes">
+        <Input
           value={g.notes ?? ''}
           placeholder="family politics, quirks…"
           onChange={(e) => s.updateGuest(g.id, { notes: e.target.value })}
         />
-      </label>
-      <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
+      </Field>
+      <div className="text-xs text-ink-soft">
         {seat ? `Seated at ${s.tables[seat.tableId]?.name}` : 'Not seated — drag their chip onto a table.'}
       </div>
-      <div className="actions">
-        <button
-          className="btn btn-danger"
+      <div className="mt-1 flex justify-between gap-1.5">
+        <Button
+          variant="destructive"
+          size="sm"
           onClick={() => {
             s.logActivity('remove guest', `Removed ${g.name} from the guest list.`, 'you')
             s.removeGuest(g.id)
           }}
         >
           Remove
-        </button>
+        </Button>
         {seat && (
-          <button
-            className="btn"
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => {
               s.unseatGuest(g.id)
               s.logActivity('unseat', `Sent ${g.name} back to the lounge.`, 'you')
             }}
           >
             Unseat
-          </button>
+          </Button>
         )}
-        <button className="btn btn-quiet" onClick={() => s.setSelection(null)}>
+        <Button variant="ghost" size="sm" onClick={() => s.setSelection(null)}>
           Done
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -100,52 +124,66 @@ function TableEditor({ sel }: { sel: Selection }) {
   const occ = Object.values(s.seating).filter((a) => a.tableId === t.id).length
 
   return (
-    <div className="editor" style={clampPos(sel.at, 258, 260)}>
-      <h3>{t.name}</h3>
-      <label>
-        Name
-        <input value={t.name} onChange={(e) => s.updateTable(t.id, { name: e.target.value })} />
-      </label>
-      <div className="row">
-        <label>
-          Seats
-          <div className="stepper">
-            <button aria-label="Remove a seat" onClick={() => s.updateTable(t.id, { seats: t.seats - 1 })} disabled={t.seats <= 2}>
+    <div className={cardCls} style={clampPos(sel.at, 264, 260)}>
+      <h3 className="font-serif text-lg leading-tight font-semibold">{t.name}</h3>
+      <Field label="Name">
+        <Input value={t.name} onChange={(e) => s.updateTable(t.id, { name: e.target.value })} />
+      </Field>
+      <div className="flex gap-1.5">
+        <Field label="Seats">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              aria-label="Remove a seat"
+              onClick={() => s.updateTable(t.id, { seats: t.seats - 1 })}
+              disabled={t.seats <= 2}
+            >
               −
-            </button>
-            <span style={{ fontWeight: 700 }}>{t.seats}</span>
-            <button aria-label="Add a seat" onClick={() => s.updateTable(t.id, { seats: t.seats + 1 })} disabled={t.seats >= 16}>
+            </Button>
+            <span className="text-sm font-bold">{t.seats}</span>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-7 w-7"
+              aria-label="Add a seat"
+              onClick={() => s.updateTable(t.id, { seats: t.seats + 1 })}
+              disabled={t.seats >= 16}
+            >
               +
-            </button>
+            </Button>
           </div>
-        </label>
-        <label>
-          Shape
-          <select
-            value={t.shape}
-            onChange={(e) => s.updateTable(t.id, { shape: e.target.value as 'round' | 'rect' })}
-          >
-            <option value="round">Round</option>
-            <option value="rect">Banquet</option>
-          </select>
-        </label>
+        </Field>
+        <Field label="Shape">
+          <Select value={t.shape} onValueChange={(v) => s.updateTable(t.id, { shape: v as 'round' | 'rect' })}>
+            <SelectTrigger className="w-full" aria-label="Shape">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="round">Round</SelectItem>
+              <SelectItem value="rect">Banquet</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
       </div>
-      <div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
+      <div className="text-xs text-ink-soft">
         {occ}/{t.seats} seats taken · drag the table to move it around the room
       </div>
-      <div className="actions">
-        <button
-          className="btn btn-danger"
+      <div className="mt-1 flex justify-between gap-1.5">
+        <Button
+          variant="destructive"
+          size="sm"
           onClick={() => {
             s.logActivity('remove table', `Removed ${t.name}.`, 'you')
             s.removeTable(t.id)
           }}
         >
           Remove Table
-        </button>
-        <button className="btn btn-quiet" onClick={() => s.setSelection(null)}>
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => s.setSelection(null)}>
           Done
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -167,10 +205,7 @@ export function Editors() {
   if (!sel) return null
   return (
     <>
-      <div
-        style={{ position: 'fixed', inset: 0, zIndex: 55 }}
-        onPointerDown={() => setSelection(null)}
-      />
+      <div style={{ position: 'fixed', inset: 0, zIndex: 55 }} onPointerDown={() => setSelection(null)} />
       {sel.kind === 'guest' ? <GuestEditor sel={sel} /> : <TableEditor sel={sel} />}
     </>
   )

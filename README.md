@@ -98,7 +98,7 @@ npm run dev     # http://localhost:5173
 npm run build   # static build in dist/
 ```
 
-Vite + React 18 + TypeScript + Zustand. No backend; deploys as a static site (this repo auto-deploys to Vercel on push).
+Vite + React 18 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. No backend; deploys as a static site (this repo auto-deploys to Vercel on push).
 
 ## How the interesting parts work
 
