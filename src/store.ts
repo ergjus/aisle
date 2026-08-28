@@ -4,6 +4,7 @@ import type {
   AisleState,
   Constraint,
   Guest,
+  PersonalizedDemoConfig,
   RSVP,
   SeatAssignment,
   Table,
@@ -11,8 +12,10 @@ import type {
   VenueFeature,
   VenueFeatureId,
   VenueDimensions,
+  ZoneId,
 } from './types'
-import { ROOM, featureBounds, findFreeSpot, freshVenue, freshVenueDimensions, roomRect, stageUnitsPerFoot, tableBodyBounds } from './geometry'
+import { ROOM, featureBounds, findFreeSpot, freshVenue, freshVenueDimensions, legacyFittedRoomRect, roomRect, stageUnitsPerFoot, tableBodyBounds } from './geometry'
+import { planPersonalizedSample, type PersonalizedPlannerResult } from './onboarding/planner'
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9)
@@ -21,12 +24,12 @@ export function uid(): string {
 /** Omit that distributes over unions, so constraint variants keep their shape. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
-const STORAGE_KEY = 'aisle:v1'
+export const CHART_STORAGE_KEY = 'aisle:v1'
 const MAX_UNDO = 60
 
 function emptyCore(): AisleState {
   return {
-    layoutVersion: 2,
+    layoutVersion: 3,
     guests: {},
     guestOrder: [],
     tables: {},
@@ -37,12 +40,13 @@ function emptyCore(): AisleState {
     groupOrder: [],
     venue: freshVenue(),
     venueDimensions: freshVenueDimensions(),
+    demoMetadata: null,
   }
 }
 
 function coreOf(s: StoreState): AisleState {
   return {
-    layoutVersion: s.layoutVersion ?? 2,
+    layoutVersion: s.layoutVersion ?? 3,
     guests: s.guests,
     guestOrder: s.guestOrder,
     tables: s.tables,
@@ -53,6 +57,7 @@ function coreOf(s: StoreState): AisleState {
     groupOrder: s.groupOrder,
     venue: s.venue,
     venueDimensions: s.venueDimensions,
+    demoMetadata: s.demoMetadata,
   }
 }
 
@@ -68,6 +73,11 @@ function reconcileGroupOrder(s: AisleState): string[] {
   return order
 }
 
+export interface RuleHighlight {
+  guestIds: string[]
+  zone: ZoneId | null
+}
+
 export interface Selection {
   kind: 'guest' | 'table'
   id: string
@@ -81,6 +91,24 @@ export interface UndoEntry {
   label: string
 }
 
+/** A seating arrangement the agent has applied *as a question* — it stays on
+ *  the chart under a Keep/Revert banner until the human rules on it. */
+export interface Proposal {
+  id: string
+  /** Banner line, e.g. "a fresh arrangement for the whole room". */
+  summary: string
+  moved: number
+  /** Seating to restore if the human reverts. */
+  beforeSeating: Record<string, SeatAssignment>
+  at: number
+}
+
+export interface Checkpoint {
+  name: string
+  state: AisleState
+  at: number
+}
+
 export interface StoreState extends AisleState {
   agentConnected: boolean
   webmcpAvailable: boolean
@@ -89,9 +117,21 @@ export interface StoreState extends AisleState {
   touched: Record<string, number>
   selection: Selection | null
   draggingGuest: string | null
+  /** Rule the user is hovering in the sidebar — the canvas spotlights the guests and zone involved. */
+  ruleHighlight: RuleHighlight | null
   undoStack: UndoEntry[]
   redoStack: UndoEntry[]
   toast: string | null
+  /** Whether the export composer dialog is open. */
+  exportOpen: boolean
+  /** Bumped on every requestExport, so an already-open dialog reloads its options. */
+  exportRequest: number
+  /** The agent proposal currently awaiting the human's Keep/Revert, if any. */
+  proposal: Proposal | null
+  /** How the last proposal ended — lets a waiting tool call read the outcome. */
+  lastProposalDecision: { id: string; decision: 'keep' | 'revert'; at: number } | null
+  /** Named session-only save points (agent- or console-created). */
+  checkpoints: Record<string, Checkpoint>
 
   snapshot: (label?: string) => void
   undo: () => boolean
@@ -116,7 +156,7 @@ export interface StoreState extends AisleState {
     patch: Partial<Omit<VenueFeature, 'id'>>,
     opts?: { snapshot?: boolean },
   ) => void
-  updateVenueDimensions: (patch: Partial<VenueDimensions>) => void
+  updateVenueDimensions: (patch: Partial<VenueDimensions>, opts?: { snapshot?: boolean }) => void
 
   addConstraint: (c: DistributiveOmit<Constraint, 'id'> & { id?: string }) => Constraint
   removeConstraint: (id: string) => void
@@ -128,8 +168,19 @@ export interface StoreState extends AisleState {
   applyArrangement: (assignments: Record<string, SeatAssignment>) => void
 
   loadSample: (sample: { guests: Guest[]; tables: Table[]; constraints: Constraint[] }) => void
+  loadPersonalizedSample: (config: PersonalizedDemoConfig) => PersonalizedPlannerResult
   resetAll: () => void
   setFinalized: (v: boolean) => void
+
+  /** Open the export composer (used by the header button and the agent's export_chart tool). */
+  requestExport: () => void
+  setExportOpen: (v: boolean) => void
+
+  beginProposal: (p: Omit<Proposal, 'at'>) => void
+  /** The human's verdict on the pending proposal; 'revert' restores the seating it replaced. */
+  resolveProposal: (decision: 'keep' | 'revert', source?: 'agent' | 'you') => void
+  saveCheckpoint: (name: string) => Checkpoint
+  restoreCheckpoint: (name: string) => Checkpoint | null
 
   setAgentConnected: () => void
   setWebmcp: (available: boolean, toolNames: string[]) => void
@@ -138,12 +189,13 @@ export interface StoreState extends AisleState {
   markTouched: (ids: string[]) => void
   setSelection: (sel: Selection | null) => void
   setDraggingGuest: (id: string | null) => void
+  setRuleHighlight: (h: RuleHighlight | null) => void
   setToast: (msg: string | null) => void
 }
 
 function loadPersisted(): AisleState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(CHART_STORAGE_KEY)
     if (!raw) return emptyCore()
     const parsed = JSON.parse(raw)
     const sourceLayoutVersion = Number(parsed.layoutVersion ?? 1)
@@ -151,11 +203,12 @@ function loadPersisted(): AisleState {
     let merged = {
       ...defaults,
       ...parsed,
-      layoutVersion: 2,
+      layoutVersion: 3,
       venue: Object.fromEntries(
         Object.entries(defaults.venue).map(([id, feature]) => [id, { ...feature, ...(parsed.venue?.[id] ?? {}), rotation: parsed.venue?.[id]?.rotation ?? 0 }]),
       ) as AisleState['venue'],
       venueDimensions: { ...defaults.venueDimensions, ...(parsed.venueDimensions ?? {}) },
+      demoMetadata: parsed.demoMetadata ?? null,
       tables: Object.fromEntries(
         Object.entries(parsed.tables ?? {}).map(([id, table]) => [id, { ...(table as Table), rotation: (table as Table).rotation ?? 0 }]),
       ),
@@ -164,24 +217,27 @@ function loadPersisted(): AisleState {
     const room = roomRect(dimensions)
     const units = stageUnitsPerFoot(dimensions)
 
-    // v1 always stretched rooms into the same abstract rectangle. Reproject
-    // those saved coordinates once so v2 can display the venue's true aspect.
-    if (sourceLayoutVersion < 2) {
-      const oldUnits = { x: ROOM.w / dimensions.widthFt, y: ROOM.h / dimensions.lengthFt }
+    // Older layouts projected the room into a fixed abstract rectangle —
+    // v1 stretched it, v2 aspect-fitted it. v3 draws the room at its true
+    // size (a fixed scale per foot), so reproject saved coordinates once,
+    // from whichever projection they were stored in.
+    if (sourceLayoutVersion < 3) {
+      const oldRoom = sourceLayoutVersion < 2 ? ROOM : legacyFittedRoomRect(dimensions)
+      const oldUnits = { x: oldRoom.w / dimensions.widthFt, y: oldRoom.h / dimensions.lengthFt }
       merged = {
         ...merged,
         tables: Object.fromEntries(
           Object.entries(merged.tables as Record<string, Table>).map(([id, table]) => [id, {
             ...table,
-            x: room.x + ((table.x - ROOM.x) / oldUnits.x) * units.x,
-            y: room.y + ((table.y - ROOM.y) / oldUnits.y) * units.y,
+            x: room.x + ((table.x - oldRoom.x) / oldUnits.x) * units.x,
+            y: room.y + ((table.y - oldRoom.y) / oldUnits.y) * units.y,
           }]),
         ) as AisleState['tables'],
         venue: Object.fromEntries(
           Object.entries(merged.venue as Record<VenueFeatureId, VenueFeature>).map(([id, feature]) => [id, {
             ...feature,
-            x: room.x + ((feature.x - ROOM.x) / oldUnits.x) * units.x,
-            y: room.y + ((feature.y - ROOM.y) / oldUnits.y) * units.y,
+            x: room.x + ((feature.x - oldRoom.x) / oldUnits.x) * units.x,
+            y: room.y + ((feature.y - oldRoom.y) / oldUnits.y) * units.y,
             w: (feature.w / oldUnits.x) * units.x,
             h: (feature.h / oldUnits.y) * units.y,
           }]),
@@ -241,12 +297,26 @@ export const useStore = create<StoreState>((set, get) => ({
   touched: {},
   selection: null,
   draggingGuest: null,
+  ruleHighlight: null,
   undoStack: [],
   redoStack: [],
   toast: null,
+  exportOpen: false,
+  exportRequest: 0,
+  proposal: null,
+  lastProposalDecision: null,
+  checkpoints: {},
 
   snapshot: (label = 'change') => {
     const s = get()
+    // A new action while an agent proposal is pending builds on top of it —
+    // that adopts the proposal as the new baseline, so record it as kept.
+    if (s.proposal) {
+      set({
+        proposal: null,
+        lastProposalDecision: { id: s.proposal.id, decision: 'keep', at: Date.now() },
+      })
+    }
     const stack = [...s.undoStack, { state: structuredClone(coreOf(s)), label }]
     if (stack.length > MAX_UNDO) stack.shift()
     set({ undoStack: stack, redoStack: [] })
@@ -256,6 +326,13 @@ export const useStore = create<StoreState>((set, get) => ({
     const s = get()
     const prev = s.undoStack[s.undoStack.length - 1]
     if (!prev) return false
+    // Undoing while a proposal is pending IS the human's verdict: revert.
+    if (s.proposal) {
+      set({
+        proposal: null,
+        lastProposalDecision: { id: s.proposal.id, decision: 'revert', at: Date.now() },
+      })
+    }
     set({
       ...prev.state,
       undoStack: s.undoStack.slice(0, -1),
@@ -295,6 +372,7 @@ export const useStore = create<StoreState>((set, get) => ({
       guestOrder: [...s.guestOrder, guest.id],
       groupOrder: withGroup(s.groupOrder, guest.group),
       finalized: false,
+      demoMetadata: null,
     }))
     return guest
   },
@@ -335,6 +413,7 @@ export const useStore = create<StoreState>((set, get) => ({
         ),
         selection: st.selection?.id === id ? null : st.selection,
         finalized: false,
+        demoMetadata: null,
       }
     })
   },
@@ -384,7 +463,7 @@ export const useStore = create<StoreState>((set, get) => ({
         groupOrder = withGroup(groupOrder, g.group)
         added.push(g)
       }
-      return { guests, guestOrder: order, groupOrder, finalized: false }
+      return { guests, guestOrder: order, groupOrder, finalized: false, demoMetadata: added.length > 0 ? null : s.demoMetadata }
     })
     return added
   },
@@ -408,6 +487,7 @@ export const useStore = create<StoreState>((set, get) => ({
       tables: { ...st.tables, [table.id]: table },
       tableOrder: [...st.tableOrder, table.id],
       finalized: false,
+      demoMetadata: null,
     }))
     return table
   },
@@ -460,6 +540,7 @@ export const useStore = create<StoreState>((set, get) => ({
         tableOrder: st.tableOrder.filter((t) => t !== id),
         selection: st.selection?.id === id ? null : st.selection,
         finalized: false,
+        demoMetadata: null,
       }
     })
     return { unseated }
@@ -489,7 +570,7 @@ export const useStore = create<StoreState>((set, get) => ({
     })
   },
 
-  updateVenueDimensions: (patch) => {
+  updateVenueDimensions: (patch, opts) => {
     const current = get()
     const nextDimensions: VenueDimensions = {
       widthFt: Math.max(20, Math.min(300, patch.widthFt ?? current.venueDimensions.widthFt)),
@@ -501,34 +582,26 @@ export const useStore = create<StoreState>((set, get) => ({
       nextDimensions.lengthFt === current.venueDimensions.lengthFt &&
       nextDimensions.snapFt === current.venueDimensions.snapFt
     ) return
-    current.snapshot('update venue dimensions')
+    if (opts?.snapshot !== false) current.snapshot('update venue dimensions')
     set((st) => {
-      const oldUnits = stageUnitsPerFoot(st.venueDimensions)
-      const nextUnits = stageUnitsPerFoot(nextDimensions)
-      const oldRoom = roomRect(st.venueDimensions)
+      // The floor-plan scale is fixed, so resizing the room adds or removes
+      // floor space around the furniture rather than stretching the layout.
+      // Anything a shrink would strand outside the walls gets nudged back in.
       const nextRoom = roomRect(nextDimensions)
       const tables = Object.fromEntries(
         Object.entries(st.tables).map(([id, table]) => {
-          let next = {
-            ...table,
-            x: nextRoom.x + ((table.x - oldRoom.x) / oldUnits.x) * nextUnits.x,
-            y: nextRoom.y + ((table.y - oldRoom.y) / oldUnits.y) * nextUnits.y,
-          }
-          const bounds = tableBodyBounds(next, nextDimensions)
+          const bounds = tableBodyBounds(table, nextDimensions)
           const dx = Math.max(nextRoom.x + 6 - bounds.left, Math.min(nextRoom.x + nextRoom.w - 6 - bounds.right, 0))
           const dy = Math.max(nextRoom.y + 6 - bounds.top, Math.min(nextRoom.y + nextRoom.h - 6 - bounds.bottom, 0))
-          next = { ...next, x: next.x + dx, y: next.y + dy }
-          return [id, next]
+          return [id, { ...table, x: table.x + dx, y: table.y + dy }]
         }),
       ) as AisleState['tables']
       const venue = Object.fromEntries(
         Object.entries(st.venue).map(([id, feature]) => {
           let next = {
             ...feature,
-            x: nextRoom.x + ((feature.x - oldRoom.x) / oldUnits.x) * nextUnits.x,
-            y: nextRoom.y + ((feature.y - oldRoom.y) / oldUnits.y) * nextUnits.y,
-            w: (feature.w / oldUnits.x) * nextUnits.x,
-            h: (feature.h / oldUnits.y) * nextUnits.y,
+            w: Math.min(feature.w, nextRoom.w - 12),
+            h: Math.min(feature.h, nextRoom.h - 12),
           }
           const bounds = featureBounds(next)
           const dx = Math.max(nextRoom.x + 6 - bounds.left, Math.min(nextRoom.x + nextRoom.w - 6 - bounds.right, 0))
@@ -629,7 +702,20 @@ export const useStore = create<StoreState>((set, get) => ({
       groupOrder,
       venue: freshVenue(),
       venueDimensions: freshVenueDimensions(),
+      demoMetadata: null,
     })
+  },
+
+  loadPersonalizedSample: (config) => {
+    const result = planPersonalizedSample(config)
+    if (!result.ok) return result
+    get().snapshot('load personalized sample')
+    set({
+      ...result.state,
+      selection: null,
+      draggingGuest: null,
+    })
+    return result
   },
 
   resetAll: () => {
@@ -638,6 +724,48 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   setFinalized: (v) => set({ finalized: v }),
+
+  requestExport: () => set((s) => ({ exportOpen: true, exportRequest: s.exportRequest + 1 })),
+  setExportOpen: (v) => set({ exportOpen: v }),
+
+  beginProposal: (p) => set({ proposal: { ...p, at: Date.now() }, lastProposalDecision: null }),
+
+  resolveProposal: (decision, source = 'you') => {
+    const s = get()
+    const p = s.proposal
+    if (!p) return
+    // Clear first, so a revert's own snapshot can't auto-adopt the proposal.
+    set({ proposal: null, lastProposalDecision: { id: p.id, decision, at: Date.now() } })
+    if (decision === 'revert') {
+      get().snapshot('revert proposal')
+      const restored = structuredClone(p.beforeSeating)
+      const current = get().seating
+      const seatKey = (a?: SeatAssignment) => (a ? `${a.tableId}:${a.seat}` : '')
+      const moved = get().guestOrder.filter((id) => seatKey(current[id]) !== seatKey(restored[id]))
+      const tables = new Set(
+        moved.flatMap((id) => [current[id]?.tableId, restored[id]?.tableId]).filter(Boolean) as string[],
+      )
+      set({ seating: restored, finalized: false })
+      get().markTouched([...moved, ...tables])
+      get().logActivity('proposal', 'Reverted the agent’s proposal — the room is back how it was.', source)
+    } else {
+      get().logActivity('proposal', `Kept the agent’s proposal (${p.moved} move${p.moved === 1 ? '' : 's'}).`, source)
+    }
+  },
+
+  saveCheckpoint: (name) => {
+    const cp: Checkpoint = { name, state: structuredClone(coreOf(get())), at: Date.now() }
+    set((s) => ({ checkpoints: { ...s.checkpoints, [name]: cp } }))
+    return cp
+  },
+
+  restoreCheckpoint: (name) => {
+    const cp = get().checkpoints[name]
+    if (!cp) return null
+    get().snapshot(`restore checkpoint "${name}"`)
+    set({ ...structuredClone(cp.state), selection: null })
+    return cp
+  },
 
   setAgentConnected: () => {
     if (!get().agentConnected) set({ agentConnected: true })
@@ -665,6 +793,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setSelection: (sel) => set({ selection: sel }),
   setDraggingGuest: (id) => set({ draggingGuest: id }),
+  setRuleHighlight: (h) => set({ ruleHighlight: h }),
   setToast: (msg) => set({ toast: msg }),
 }))
 
@@ -675,7 +804,7 @@ useStore.subscribe((s) => {
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(coreOf(s)))
+      localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(coreOf(s)))
     } catch {
       // Storage full or unavailable; the session simply won't persist.
     }

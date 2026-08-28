@@ -14,7 +14,7 @@ const GROUPS: { title: string; blurb: string; names: string[] }[] = [
   {
     title: 'Reading the room',
     blurb: 'How the agent sees what you see — no changes, just eyes.',
-    names: ['get_seating_chart', 'list_guests', 'list_unseated', 'list_constraints', 'list_violations'],
+    names: ['get_seating_chart', 'list_guests', 'list_unseated', 'list_constraints', 'list_violations', 'explain_seating'],
   },
   {
     title: 'The guest list',
@@ -29,7 +29,12 @@ const GROUPS: { title: string; blurb: string; names: string[] }[] = [
   {
     title: 'Seating the room',
     blurb: 'Moving people — one chair at a time or the whole room at once.',
-    names: ['seat_guest', 'unseat_guest', 'swap_guests', 'auto_arrange', 'clear_seating'],
+    names: ['seat_guest', 'unseat_guest', 'swap_guests', 'auto_arrange', 'propose_arrangement', 'clear_seating'],
+  },
+  {
+    title: 'Safety nets',
+    blurb: 'Bold moves without fear — save points, and proposals the human rules on.',
+    names: ['save_checkpoint', 'restore_checkpoint'],
   },
   {
     title: 'House rules',
@@ -37,15 +42,21 @@ const GROUPS: { title: string; blurb: string; names: string[] }[] = [
     names: ['add_constraint', 'remove_constraint'],
   },
   {
-    title: 'Demo & finale',
-    blurb: 'A ready-made wedding to play with, and the final bow.',
-    names: ['load_sample_wedding', 'finalize_chart'],
+    title: 'The deliverable',
+    blurb: 'The agent composes the printed seating document; you press Print.',
+    names: ['export_chart', 'get_chart_document', 'finalize_chart'],
+  },
+  {
+    title: 'Demo',
+    blurb: 'A ready-made wedding to play with.',
+    names: ['load_sample_wedding'],
   },
 ]
 
 const GATE_NOTES: Record<CatalogEntry['requires'], { locked: string; open: string } | null> = {
   always: null,
   tables: { locked: 'Appears once the room has a table', open: 'Available — the room has tables' },
+  content: { locked: 'Appears once the chart has guests or tables', open: 'Available — there is something to export' },
   perfect: { locked: 'Appears when everyone is seated and no rule is broken', open: 'Unlocked — the chart is perfect' },
 }
 

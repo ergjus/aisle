@@ -2,14 +2,14 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { computeViolations, dramaScore } from '../constraints'
 import { ToolsPage } from './ToolsPage'
-import { chartMarkdown, downloadText } from '../utils'
+import { ExportDialog } from './ExportDialog'
 import { SAMPLE } from '../sample'
 import { seatEveryone } from '../actions'
 import { DramaMeter } from './DramaMeter'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
-export function Header() {
+export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
   const s = useStore()
   const [showTools, setShowTools] = useState(false)
   const violations = computeViolations(s)
@@ -30,17 +30,17 @@ export function Header() {
     s.logActivity('load sample', 'Loaded the sample wedding: 72 guests, 10 tables, 17 rules.', 'you')
   }
 
-  // The board still is the sample, structurally — every guest and table id
-  // on the chart came from it, and nothing else has been added. Once the
-  // user edits it (adds/removes a guest or table), this flips back off and
-  // the button returns to "Load Sample Wedding" on its own.
+  // The default sample is recognized structurally. A personalized sample uses
+  // persisted metadata because its table count and IDs depend on onboarding;
+  // structural guest/table edits clear that marker in the store.
   const sampleGuestIds = new Set(SAMPLE.guests.map((g) => g.id))
   const sampleTableIds = new Set(SAMPLE.tables.map((t) => t.id))
-  const isSample =
+  const isDefaultSample =
     s.guestOrder.length === SAMPLE.guests.length &&
     s.tableOrder.length === SAMPLE.tables.length &&
     s.guestOrder.every((id) => sampleGuestIds.has(id)) &&
     s.tableOrder.every((id) => sampleTableIds.has(id))
+  const isSample = Boolean(s.demoMetadata) || isDefaultSample
 
   const removeSample = () => {
     s.resetAll()
@@ -62,7 +62,11 @@ export function Header() {
       <DramaMeter score={score} broken={violations.length} />
       <div className="min-w-2 flex-1" />
       <div className="flex flex-wrap items-center gap-2">
+        <Button data-tour="welcome-guide" variant="ghost" size="sm" onClick={onWelcomeGuide}>
+          Welcome guide
+        </Button>
         <button
+          data-tour="webmcp-badge"
           className="inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs font-semibold whitespace-nowrap text-ink-soft transition-colors hover:border-gold hover:bg-accent"
           title="This page registers its seating tools with your browser via WebMCP (navigator.modelContext), so an AI agent can work the chart with you. Click to browse every tool."
           onClick={() => setShowTools(true)}
@@ -80,6 +84,7 @@ export function Header() {
           {isSample ? 'Remove Sample Wedding' : 'Load Sample Wedding'}
         </Button>
         <Button
+          data-tour="seat-everyone"
           variant={!empty && unseated > 0 && violations.length === 0 ? 'default' : 'outline'}
           size="sm"
           onClick={() => seatEveryone('full')}
@@ -95,13 +100,14 @@ export function Header() {
           Redo
         </Button>
         <Button
+          data-tour="export"
           variant="outline"
           size="sm"
-          onClick={() => downloadText('seating-chart.md', chartMarkdown(s))}
-          disabled={s.guestOrder.length === 0}
-          title="Download the chart as a per-table Markdown list with dietary summary"
+          onClick={() => s.requestExport()}
+          disabled={empty}
+          title="A print-ready seating document — floor plan, table charts, guest directory, catering notes — plus Markdown and CSV"
         >
-          Export List
+          Export…
         </Button>
         <Button
           variant="outline"
@@ -115,6 +121,7 @@ export function Header() {
         </Button>
       </div>
       {showTools && <ToolsPage onClose={() => setShowTools(false)} />}
+      {s.exportOpen && <ExportDialog onClose={() => s.setExportOpen(false)} />}
     </header>
   )
 }

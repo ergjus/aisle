@@ -1,15 +1,23 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, Plus } from 'lucide-react'
 import { useStore } from '../store'
 import { groupColors, parseGuestEntries } from '../utils'
-import { constraintStatus, constraintText } from '../constraints'
+import { constraintStatus, constraintText, findDuplicateRule, zoneLabel, zoneNoun, type RuleDraft } from '../constraints'
 import { feetSize, formatFeet } from '../geometry'
-import type { VenueFeatureId, ZoneId } from '../types'
+import type { Constraint, VenueFeatureId, ZoneId } from '../types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from '@/components/ui/combobox'
 import {
   Select,
   SelectContent,
@@ -87,6 +95,7 @@ function Section(props: {
   const { open } = props
   return (
     <Collapsible
+      data-tour={props.id}
       open={open}
       onOpenChange={props.onOpenChange}
       className={cn(
@@ -252,7 +261,7 @@ function VenueSection() {
       </div>
 
       <p className="px-1 text-[10.5px] leading-snug text-ink-soft">
-        Room changes keep furniture true to scale. Alt moves freely · Shift-click selects a group.
+        Resizing the room adds floor space — furniture stays put. Drag the room's walls to resize it · drag the empty floor to pan · pinch or ⌘-scroll to zoom · Alt moves freely · Shift-click selects a group.
       </p>
 
       <div className="grid grid-cols-1 gap-1">
@@ -633,83 +642,168 @@ function ActivitySection() {
 
 // ---- house rules ------------------------------------------------------------
 
-const RULE_OPTIONS = [
-  { value: 'together', label: 'Must sit together' },
-  { value: 'apart', label: 'Must sit apart' },
-  { value: 'near:dance_floor', label: 'Near the dance floor' },
-  { value: 'far:dance_floor', label: 'Away from the dance floor' },
-  { value: 'near:band', label: 'Near the band' },
-  { value: 'far:band', label: 'Away from the band' },
-  { value: 'near:entrance', label: 'Near the entrance' },
-  { value: 'far:entrance', label: 'Away from the entrance' },
+const ZONES: ZoneId[] = ['dance_floor', 'band', 'entrance']
+
+// items props let SelectValue show these labels without the popup ever opening.
+const VERB_ITEMS = [
+  { value: 'keep', label: 'Keep' },
+  { value: 'seat', label: 'Seat' },
+]
+const PAIR_ITEMS = [
+  { value: 'together', label: 'together' },
+  { value: 'apart', label: 'apart' },
+]
+const PREFERENCE_ITEMS = [
+  { value: 'near', label: 'near' },
+  { value: 'far', label: 'away from' },
 ]
 
-function GuestSelect(props: {
+function GuestPicker(props: {
   value: string
-  onChange: (v: string) => void
+  onChange: (id: string) => void
   placeholder: string
   exclude?: string
 }) {
   const s = useStore()
+  const items = s.guestOrder
+    .filter((id) => id !== props.exclude)
+    .map((id) => ({ value: id, label: s.guests[id].name }))
+  const selected = items.find((i) => i.value === props.value) ?? null
   return (
-    <Select value={props.value} onValueChange={(v) => v !== null && props.onChange(v)}>
-      <SelectTrigger className="w-full min-w-0" size="sm" aria-label={props.placeholder}>
-        <SelectValue placeholder={props.placeholder} />
-      </SelectTrigger>
-      <SelectContent>
-        {s.guestOrder
-          .filter((id) => id !== props.exclude)
-          .map((id) => (
-            <SelectItem key={id} value={id}>
-              {s.guests[id].name}
-            </SelectItem>
-          ))}
-      </SelectContent>
-    </Select>
+    <Combobox items={items} value={selected} onValueChange={(item) => props.onChange(item?.value ?? '')}>
+      <ComboboxInput size="sm" placeholder={props.placeholder} aria-label={props.placeholder} />
+      <ComboboxContent>
+        <ComboboxEmpty>No guest matches.</ComboboxEmpty>
+        <ComboboxList>
+          {(item: { value: string; label: string }) => (
+            <ComboboxItem key={item.value} value={item}>
+              {item.label}
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   )
 }
 
+/** The composer builds the rule as the sentence it will become:
+ *  "Keep [A] and [B] [together]" / "Seat [A] [near] [the dance floor]". */
 function AddRule() {
   const s = useStore()
-  const [type, setType] = useState('together')
+  const [verb, setVerb] = useState<'keep' | 'seat'>('keep')
+  const [pairKind, setPairKind] = useState<'together' | 'apart'>('together')
+  const [preference, setPreference] = useState<'near' | 'far'>('near')
+  const [zone, setZone] = useState<ZoneId>('dance_floor')
   const [a, setA] = useState('')
   const [b, setB] = useState('')
-  const isPair = type === 'together' || type === 'apart'
+  const [note, setNote] = useState('')
+
+  const isPair = verb === 'keep'
+  const complete = isPair ? Boolean(a && b && a !== b) : Boolean(a)
+  const candidate: RuleDraft | null = !complete
+    ? null
+    : isPair
+      ? { type: pairKind, a, b }
+      : { type: 'zone', guestId: a, zone, preference }
+  const dup = candidate ? findDuplicateRule(s, candidate) : undefined
+  const zoneHidden = !isPair && !s.venue[zone]?.enabled
 
   const add = () => {
-    if (!a) return
-    let added
-    if (isPair) {
-      if (!b || a === b) return
-      added = s.addConstraint({ type: type as 'together' | 'apart', a, b })
-    } else {
-      const [preference, zone] = type.split(':') as ['near' | 'far', ZoneId]
-      added = s.addConstraint({ type: 'zone', guestId: a, zone, preference })
-    }
+    if (!candidate || dup || zoneHidden) return
+    const added = s.addConstraint({ ...candidate, note: note.trim() || undefined })
     s.logActivity('add rule', `Added rule: ${constraintText(s, added)}.`, 'you')
     setA('')
     setB('')
+    setNote('')
   }
 
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border bg-parchment/70 p-2">
-      <Select value={type} onValueChange={(v) => v !== null && setType(v)}>
-        <SelectTrigger className="w-full" size="sm" aria-label="Kind of rule">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {RULE_OPTIONS.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
-              {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <div className="flex min-w-0 gap-1.5 *:flex-1">
-        <GuestSelect value={a} onChange={setA} placeholder={isPair ? 'First guest…' : 'Guest…'} />
-        {isPair && <GuestSelect value={b} onChange={setB} placeholder="Second guest…" exclude={a} />}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Select items={VERB_ITEMS} value={verb} onValueChange={(v) => v !== null && setVerb(v as 'keep' | 'seat')}>
+          <SelectTrigger size="sm" className="shrink-0" aria-label="Kind of rule">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {VERB_ITEMS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="min-w-[120px] flex-1">
+          <GuestPicker value={a} onChange={setA} placeholder="a guest…" exclude={isPair ? b : undefined} />
+        </div>
+        {isPair ? (
+          <>
+            <span className="text-[12.5px] text-ink-soft">and</span>
+            <div className="min-w-[120px] flex-1">
+              <GuestPicker value={b} onChange={setB} placeholder="another guest…" exclude={a} />
+            </div>
+            <Select items={PAIR_ITEMS} value={pairKind} onValueChange={(v) => v !== null && setPairKind(v as 'together' | 'apart')}>
+              <SelectTrigger size="sm" className="shrink-0" aria-label="Together or apart">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAIR_ITEMS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        ) : (
+          <>
+            <Select items={PREFERENCE_ITEMS} value={preference} onValueChange={(v) => v !== null && setPreference(v as 'near' | 'far')}>
+              <SelectTrigger size="sm" className="shrink-0" aria-label="Near or away from">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PREFERENCE_ITEMS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              items={ZONES.map((z) => ({ value: z, label: zoneNoun(z) }))}
+              value={zone}
+              onValueChange={(v) => v !== null && setZone(v as ZoneId)}
+            >
+              <SelectTrigger size="sm" className="min-w-0 flex-1" aria-label="Which spot">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ZONES.map((z) => (
+                  <SelectItem key={z} value={z}>
+                    {zoneNoun(z)}
+                    {!s.venue[z]?.enabled && ' (hidden)'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        )}
       </div>
-      <Button variant="outline" size="sm" onClick={add} disabled={!a || (isPair && (!b || a === b))}>
+      <Input
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Why? e.g. “recently divorced” (optional)"
+        aria-label="Why this rule exists (optional)"
+        className="h-7 text-[12.5px]"
+      />
+      {dup && (
+        <p className="px-0.5 text-[11.5px] text-brick">Already a rule: “{constraintText(s, dup)}”.</p>
+      )}
+      {zoneHidden && !dup && (
+        <p className="px-0.5 text-[11.5px] text-ink-soft">
+          {zoneLabel(zone)} is hidden on the floor plan — show it in the Venue section first.
+        </p>
+      )}
+      <Button variant="outline" size="sm" onClick={add} disabled={!complete || !!dup || zoneHidden}>
         Add Rule
       </Button>
     </div>
@@ -720,6 +814,19 @@ function RulesSection() {
   const s = useStore()
   const counts = { ok: 0, violated: 0, pending: 0 }
   for (const c of s.constraints) counts[constraintStatus(s, c)]++
+
+  // Broken rules surface first, then ones waiting on seats, then kept ones.
+  const STATUS_ORDER = { violated: 0, pending: 1, ok: 2 }
+  const sorted = [...s.constraints].sort(
+    (x, y) => STATUS_ORDER[constraintStatus(s, x)] - STATUS_ORDER[constraintStatus(s, y)],
+  )
+
+  const highlight = (c: Constraint) =>
+    s.setRuleHighlight(
+      c.type === 'zone' ? { guestIds: [c.guestId], zone: c.zone } : { guestIds: [c.a, c.b], zone: null },
+    )
+  // Don't leave a spotlight stuck on the canvas when the section collapses mid-hover.
+  useEffect(() => () => useStore.getState().setRuleHighlight(null), [])
 
   return (
     <>
@@ -740,11 +847,18 @@ function RulesSection() {
           Rules like “keep the exes apart” live here — add one above, or just tell your agent.
         </p>
       )}
-      {s.constraints.map((c) => {
+      {sorted.map((c) => {
         const status = constraintStatus(s, c)
         const statusText = status === 'ok' ? 'kept' : status === 'violated' ? 'broken' : 'waiting — someone is unseated'
         return (
-          <div key={c.id} className="flex items-start gap-2 rounded-md px-1.5 py-1.5 hover:bg-accent">
+          <div
+            key={c.id}
+            className="flex items-start gap-2 rounded-md px-1.5 py-1.5 hover:bg-accent"
+            onPointerEnter={() => highlight(c)}
+            onPointerLeave={() => s.setRuleHighlight(null)}
+            onFocusCapture={() => highlight(c)}
+            onBlurCapture={() => s.setRuleHighlight(null)}
+          >
             <span
               className={cn(
                 'mt-1.5 h-2 w-2 shrink-0 rounded-full',
@@ -791,6 +905,14 @@ export function Sidebar() {
     rules: false,
   })
   const setOpen = (id: SectionId, v: boolean) => setOpenMap({ ...open, [id]: v })
+
+  // A drag (or agent move) that breaks a rule pops the section open, so the
+  // cause of the new warning is on screen next to its effect.
+  const prevBroken = useRef(brokenCount)
+  useEffect(() => {
+    if (brokenCount > prevBroken.current && !open.rules) setOpen('rules', true)
+    prevBroken.current = brokenCount
+  })
 
   const [weights, setWeights] = usePersistedJSON<Record<SectionId, number>>('aisle:sidebar:weights', DEFAULT_WEIGHTS)
 

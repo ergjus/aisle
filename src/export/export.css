@@ -1,0 +1,398 @@
+/*
+ * The printed export document + its on-screen preview.
+ *
+ * Sizing contract: model.ts paginates from constants (EXPORT_METRICS, CARD,
+ * DIRECTORY, CATERING). Any height-affecting change here must be mirrored
+ * there — the annotations below call out each budgeted value.
+ */
+
+.export-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 50px 64px 42px; /* padTop 50 · padX 64 · padBottom 42 */
+  background: #fdfaf3;
+  color: #29241d;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.export-page.paper-letter { width: 8.5in; height: 11in; }
+.export-page.paper-a4 { width: 210mm; height: 297mm; }
+
+.export-page-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---- running footer (footerH 36 = 12 padding + 1 border + 23 content) ---- */
+
+.export-footer {
+  display: flex;
+  height: 36px;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #d8cdb2;
+  padding-top: 11px;
+  color: #a99e8a;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.export-footer-brand { color: #8c7433; font-weight: 700; letter-spacing: 0.14em; }
+.export-footer-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- masthead (mastheadHeight: 14+8+38·lines+8+16+14+1+18 ≤ 118+38·extra) */
+
+.export-masthead {
+  margin-bottom: 18px;
+  border-bottom: 1px solid #d8cdb2;
+  padding-bottom: 14px;
+}
+
+.export-kicker {
+  margin-bottom: 8px;
+  color: #8c7433;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+  line-height: 14px;
+  text-transform: uppercase;
+}
+
+.export-masthead h1 {
+  font-family: var(--font-heading);
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 38px;
+}
+
+.export-masthead-meta {
+  margin-top: 8px;
+  color: #7a7060;
+  font-size: 11.5px;
+  line-height: 16px;
+}
+
+.export-status {
+  margin-left: 10px;
+  border: 1px solid #d8cdb2;
+  border-radius: 999px;
+  padding: 1px 8px 2px;
+  color: #7a7060;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+.export-status.final {
+  border-color: #c5a55e;
+  color: #8c7433;
+}
+
+/* ---- section headers (sectionHeaderH 50 = 24+8+1+16; continued 34) ------- */
+
+.export-section-header {
+  display: flex;
+  margin-bottom: 16px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #d8cdb2;
+  padding-bottom: 8px;
+}
+
+.export-section-header h2 {
+  font-family: var(--font-heading);
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.export-section-header span {
+  color: #a99e8a;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.export-continued {
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e7dfcb;
+  padding-bottom: 6px;
+  color: #a99e8a;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 14px;
+  text-transform: uppercase;
+}
+
+/* legendLineH 22 = 16 + 6 */
+.export-legend-line {
+  margin-bottom: 6px;
+  color: #7a7060;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* ---- column flow (columnGap 28) ------------------------------------------ */
+
+.export-columns {
+  display: flex;
+  gap: 28px;
+}
+
+.export-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.export-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 999px;
+  background: #a99e8a;
+}
+
+.export-dot.open {
+  border: 1px solid #a99e8a;
+  background: transparent;
+}
+
+.export-pending {
+  margin-left: 3px;
+  color: #8c7433;
+}
+
+.export-marker {
+  margin-left: 3px;
+  color: #8c7433;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+/* ---- table cards (CARD: base 58 ≥ 2+20+33, row 17, open 20, empty 18) ---- */
+
+.export-card {
+  margin-bottom: 12px; /* CARD.gap */
+  border: 1px solid #d8cdb2;
+  border-radius: 8px;
+  padding: 10px 12px;
+  break-inside: avoid;
+}
+
+.export-card.unseated {
+  border-style: dashed;
+  background: #faf6ea;
+}
+
+.export-card > header {
+  display: flex;
+  margin-bottom: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid #e7dfcb;
+  padding-bottom: 6px;
+}
+
+.export-card h3 {
+  overflow: hidden;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.export-card > header span {
+  color: #a99e8a;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.export-card li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  line-height: 17px; /* CARD.row */
+}
+
+.export-card li .export-dot { margin-top: 5px; }
+
+.export-card-name { min-width: 0; }
+
+.export-card-empty {
+  color: #a99e8a;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 18px; /* CARD.emptyLine */
+}
+
+.export-card-open {
+  margin-top: 4px;
+  color: #a99e8a;
+  font-size: 10.5px;
+  line-height: 16px; /* + 4 margin = CARD.openLine 20 */
+}
+
+/* ---- directory (DIRECTORY: letter 26 = 8+18, row lh 18 ≤ 19/36) --------- */
+
+.export-dir-letter {
+  margin-top: 8px;
+  font-family: var(--font-heading);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 18px;
+  color: #8c7433;
+}
+
+.export-dir-letter:first-child { margin-top: 0; }
+
+.export-dir-row {
+  display: flex;
+  align-items: baseline;
+  font-size: 11.5px;
+  line-height: 18px;
+}
+
+.export-dir-name { min-width: 0; }
+
+.export-dir-leader {
+  flex: 1 1 auto;
+  min-width: 12px;
+  margin: 0 5px;
+  border-bottom: 1px dotted #cdc0a1;
+  transform: translateY(-3px);
+}
+
+.export-dir-table { white-space: nowrap; color: #7a7060; }
+.export-dir-table.dim { color: #a99e8a; font-style: italic; }
+
+/* ---- catering (CATERING: base 36 ≥ 16+6+12, line 17) --------------------- */
+
+.export-catering-block {
+  margin-bottom: 12px; /* CATERING.gap */
+  border-left: 2px solid #c5a55e;
+  padding-left: 10px;
+  break-inside: avoid;
+}
+
+.export-catering-block h3 {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 16px;
+}
+
+.export-catering-block li {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.export-catering-block li.dim {
+  color: #a99e8a;
+  font-style: italic;
+}
+
+/* ---- floor plan page ----------------------------------------------------- */
+
+.export-plan-area {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.export-plan-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* legendH = rows·20 + 14 */
+.export-plan-legend {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  align-items: center;
+  column-gap: 14px;
+  overflow: hidden;
+}
+
+.export-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #7a7060;
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.export-legend-item.dim { margin-left: auto; color: #a99e8a; }
+
+/* ---- on-screen preview --------------------------------------------------- */
+
+.export-preview-stack .export-page {
+  margin: 0 auto 24px;
+  border-radius: 2px;
+  box-shadow:
+    0 1px 2px rgba(6, 12, 8, 0.5),
+    0 14px 38px rgba(6, 12, 8, 0.45);
+}
+
+/* ---- print --------------------------------------------------------------- */
+
+.export-print-root {
+  display: none;
+}
+
+@media print {
+  /* While the export dialog is open, the export IS the document. */
+  body.aisle-export-printing > :not(.export-print-root) {
+    display: none !important;
+  }
+
+  body.aisle-export-printing .export-print-root {
+    display: block;
+  }
+
+  .export-print-root .export-page {
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+    break-after: page;
+  }
+
+  .export-print-root .export-page:last-child {
+    break-after: auto;
+  }
+}

@@ -23,7 +23,9 @@ Neither of you could do this alone. That's the point.
 4. Watch the room arrange itself, with a plain-language explanation of every trade-off.
 5. Drag Sam Whitfield onto Jordan's table. Watch the violation line appear and the drama meter rise.
 6. Ask: *"Fix any problems I just caused."* → *"Repaired the chart, moving only 1 guest."*
-7. When every guest is seated and no rules are broken, a `finalize_chart` tool **appears out of nowhere** — ask your agent to finalize, and get a caterer-ready seating list.
+7. Ask: *"propose a bolder arrangement."* The room plays it out live under a gold **Keep / Revert** banner — and the agent's tool call **waits for your verdict**, then reports which way you ruled.
+8. When every guest is seated and no rules are broken, a `finalize_chart` tool **appears out of nowhere** — ask your agent to finalize, and get a caterer-ready seating list.
+9. Say *"prepare the printed seating document — title it June & Ravi."* The **export studio opens on screen, already composed**: a to-scale floor plan, per-table cards, an A–Z guest directory, and a catering summary, paginated with a live preview. You press **Print · Save as PDF** — the one button an agent can't press.
 
 No login, no backend. State lives in your browser's localStorage.
 
@@ -31,12 +33,15 @@ No login, no backend. State lives in your browser's localStorage.
 
 Aisle registers its tools through `navigator.modelContext` (with fallbacks for `document.modelContext` / `window.modelContext` across preview builds, and `provideContext` for older drafts). Every tool has a natural-language description and a JSON Schema; read-only tools carry `readOnlyHint` annotations. Guests and tables are addressed by **fuzzy name** — agents say `"Grandma"` or `"Table 4"`, and ambiguity comes back as a helpful error listing candidates.
 
-**Always registered (11):**
+**Always registered (16):**
 
 | Tool | What it does |
 | --- | --- |
 | `get_seating_chart` | Full room state: tables + occupants, unseated, constraints with status, violations, drama score |
+| `update_venue` / `update_venue_dimensions` | The floor plan itself: room size in real feet, and nine amenities (dance floor, band, bar, buffet…) shown/hidden, placed, resized, rotated — with overlap warnings |
 | `list_guests` | Roster with group, RSVP, dietary, notes; filter by unseated/group/RSVP |
+| `explain_seating` | *Why is she there?* One guest's seat, tablemates, group context, and every rule involving them with live status — including how near/far their table actually is from the dance floor, band, or entrance |
+| `save_checkpoint` / `restore_checkpoint` | Named save points over the whole chart. The agent checkpoints before a bold experiment; if the human hates the result, one call puts everything back — and the restore itself is undoable |
 | `add_guest` / `update_guest` / `remove_guest` | Guest management; setting RSVP "no" frees the seat |
 | `import_guests` | Bulk import from pasted text or JSON — one guest per line with optional group, dietary, RSVP |
 | `add_table` | Add a named table (2–16 seats, round or banquet) in an open spot |
@@ -44,14 +49,22 @@ Aisle registers its tools through `navigator.modelContext` (with fallbacks for `
 | `remove_constraint` / `list_constraints` | Manage rules by id or by guest |
 | `load_sample_wedding` | The demo wedding, one call away |
 
-**Registered only while tables exist (9):**
+**Registered only while tables exist (10):**
 
 | Tool | What it does |
 | --- | --- |
 | `seat_guest` / `unseat_guest` / `swap_guests` | Seat-level operations; a full table fails with the list of tables that still have space |
 | `auto_arrange` | The solver. `mode: "full"` redesigns the room; `mode: "repair"` fixes violations while moving as few guests as possible. Returns a plain-language explanation of what it honored and what it couldn't |
+| `propose_arrangement` | `auto_arrange` as a **question**: the arrangement plays out live under a Keep/Revert banner, and the tool call **blocks until the human decides** (or ~30s pass), then reports the verdict. Any further edit quietly adopts a pending proposal; undo rejects it |
 | `update_table` / `remove_table` | Resize, rename, reshape, remove — displaced guests go politely back to the lounge |
 | `clear_seating` / `list_unseated` / `list_violations` | Bulk reset and read tools for reasoning before acting |
+
+**Registered while the chart has anything in it (2):**
+
+| Tool | What it does |
+| --- | --- |
+| `export_chart` | Composes the **printed seating document** — to-scale floor plan, table cards, A–Z directory, catering summary — and opens the export studio on screen pre-filled with the agent's masthead (title, date, venue), paper size, and section choices. The human reviews the live page preview and presses *Print · Save as PDF*: a real human-agent handoff, because the print button is the one thing an agent can't press |
+| `get_chart_document` | The same chart as portable data — a per-table Markdown list for pasting into an email, or CSV (one row per guest) for a spreadsheet |
 
 **Registered only while the chart is perfect (1):**
 
@@ -69,10 +82,17 @@ Everything the agent can do, you can do by hand on the same state:
 - **Click** any chip or table to edit details in place — or Tab to it and press Enter; the canvas is keyboard-accessible.
 - **Seat Everyone** runs the same solver the agent uses, straight from the header; when rules break, a **"⚠ N rules broken · Fix With Minimal Moves"** banner appears on the chart and repairs the room in one click.
 - **Undo/redo** every change, yours or the agent's (⌘Z — the veto button).
+- **Rule on proposals** — when the agent uses `propose_arrangement`, the room rearranges live under a gold **Keep / Revert** banner and the agent literally waits for your click. Reverting glides everyone back; pressing ⌘Z counts as a revert; simply continuing to work adopts the proposal.
 - Violated rules draw animated dashed lines between the offending guests, badge the table, and feed the **drama meter** (*Serene → Simmering → Full telenovela*); a legend on the chart decodes the group colors.
 - Actions stream into a shared activity feed — the agent's entries in gold, yours labeled *You* — and everything the agent touches glows for a moment with a name tag, so bulk rearrangements stay legible.
 
 The chart is a real seating planner without any agent at all — with a visible hint inviting you to bring one.
+
+## The deliverable: a printed seating document
+
+**Export…** opens a studio-style composer for the document you'd actually pin up at the venue: a masthead with the couple's names, date, and a Final/Working-draft stamp; a **to-scale vector floor plan** (dimension strings, 5′ grid, scale bar, seats colored by guest group); per-table seating cards with dietary superscripts; an A–Z **"find your seat" directory**; and a catering & dietary summary for the kitchen. Sections are toggleable with a live page preview (Letter or A4), and it prints through the browser — so *Save as PDF* is one keystroke, with Markdown and CSV alongside.
+
+The same composer is a tool: an agent calls `export_chart` with a title, date, venue, and section list, and the studio **opens on the human's screen already composed** — the human just reviews the preview and presses Print. Planning ends with a real artifact, made by both of you.
 
 ## Testing with an agent
 
@@ -88,6 +108,9 @@ aisle.call('load_sample_wedding', {})
 aisle.call('auto_arrange', { mode: 'full' })    // watch the room arrange itself
 aisle.call('seat_guest', { guest: 'Sam', table: 'Table 4' })
 aisle.call('auto_arrange', { mode: 'repair' })
+aisle.call('propose_arrangement', { mode: 'full' })  // Keep/Revert banner appears; the call waits for your verdict
+aisle.call('explain_seating', { guest: 'Grandma' })
+aisle.call('export_chart', { title: 'June & Ravi', paper: 'letter' })  // opens the print studio, composed
 ```
 
 ## Running locally
@@ -105,7 +128,9 @@ Vite + React 18 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui
 - **The solver** (`src/solver.ts`) — union-find clusters must-sit-together groups, seeds them greedily (most-constrained first), then hill-climbs with a seeded RNG over moves and swaps against a score that weighs hard rules (30 pts), zone preferences (12), group cohesion, and — in repair mode — a small penalty per displaced guest, which is what makes *"fix my mess"* move one person instead of reshuffling the room. It narrates its result in plain language, including what it couldn't satisfy and why.
 - **Zone rules** (`src/geometry.ts`) — "near the dance floor" means the guest's table is in the closest ~third of the distance range across all tables, so the rules stay meaningful as tables are dragged around.
 - **The living chart** (`src/components/Canvas.tsx`) — every guest is one absolutely-positioned chip in a single coordinate space (tables *and* the unseated lounge), so any state change animates as a pure CSS transform glide, with a stable per-chip stagger for bulk moves. Agent-touched chips get one-shot CSS pulse animations on keyed overlay elements — no timers, nothing to get stuck.
-- **Dynamic registration** (`src/webmcp/tools.ts`) — a store subscription recomputes the toolset signature (`hasTables`, `canFinalize`) on every state change and diffs registrations, so tools appear and vanish as the room evolves.
+- **Dynamic registration** (`src/webmcp/tools.ts`) — a store subscription recomputes the toolset signature (`hasTables`, `hasContent`, `canFinalize`) on every state change and diffs registrations, so tools appear and vanish as the room evolves.
+- **Tool calls that wait for people** (`propose_arrangement`) — every mutating tool already holds its reply until the cursor choreography finishes; proposals extend the same mechanism to a *human decision*: the reply stays open until Keep/Revert (or times out politely into a pending note). The proposal's lifecycle is honest under concurrency — any new snapshot adopts it, undo rejects it — and that logic is unit-tested.
+- **The export document** (`src/export/`) — the printed chart is modeled as plain data first: deterministic pagination from measured constants (unit-tested, no browser needed), then rendered twice from the same model — scaled down as the dialog's live preview and full-size for the browser's print pipeline, so what you preview is exactly what prints. The floor plan is one generated SVG: real-feet scale, dimension strings, hatched dance floor, seats colored by guest group.
 
 ## License
 

@@ -1,12 +1,14 @@
-import { getCore, occupantsOf, useStore } from '../store'
+import { getCore, occupantsOf, uid, useStore } from '../store'
 import type { AisleState, Guest, RSVP, Table, VenueFeatureId, ZoneId } from '../types'
-import { ROOM, featureMinSize, feetSize, formatFeet, layoutConflicts, roomRect, stageUnitsPerFoot, tableBodyBounds } from '../geometry'
-import { computeViolations, constraintStatus, constraintText, dramaLabel, dramaScore } from '../constraints'
+import { ROOM, featureMinSize, feetSize, formatFeet, layoutConflicts, roomRect, stageUnitsPerFoot, tableBodyBounds, zoneBands } from '../geometry'
+import { computeViolations, constraintStatus, constraintText, dramaLabel, dramaScore, findDuplicateRule } from '../constraints'
 import { autoArrange } from '../solver'
 import { SAMPLE } from '../sample'
-import { parseGuestEntries } from '../utils'
+import { chartMarkdown, parseGuestEntries } from '../utils'
+import { buildDocModel, chartCSV, type ExportSections, type PaperSize } from '../export/model'
+import { loadExportOptions, saveExportOptions } from '../export/options'
 import { syncTools, webmcpAvailable, type WebTool } from './adapter'
-import { choreograph, glance } from '../agentCursor'
+import { choreograph, glance, touchAgentSession } from '../agentCursor'
 
 // ---- result helpers --------------------------------------------------------
 
@@ -14,6 +16,10 @@ interface HandlerResult {
   text: string
   touched?: string[]
   isError?: boolean
+  /** Runs after the choreography settles; its return is appended to the reply.
+   *  Lets a tool hold its answer open for something slower than animation —
+   *  like a human deciding on a proposal. */
+  finish?: () => Promise<string>
 }
 
 function ok(text: string, touched?: string[]): HandlerResult {
@@ -28,6 +34,36 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 /** Never let a stuck animation hold a tool reply hostage. */
 const MAX_CHOREOGRAPHY_WAIT_MS = 16000
+
+/** How long propose_arrangement's reply waits for the human's Keep/Revert. */
+const PROPOSAL_WAIT_MS = 30000
+
+/** Resolves with the human's verdict on proposal `id`, or 'pending' on timeout. */
+function waitForProposalDecision(id: string, timeoutMs: number): Promise<'keep' | 'revert' | 'pending'> {
+  return new Promise((resolve) => {
+    const read = (s: ReturnType<typeof useStore.getState>): 'keep' | 'revert' | null => {
+      if (s.proposal?.id === id) return null
+      const d = s.lastProposalDecision
+      // Gone without a recorded verdict (e.g. a reset) — treat as adopted.
+      return d?.id === id ? d.decision : 'keep'
+    }
+    const first = read(useStore.getState())
+    if (first) return resolve(first)
+    let unsub: () => void = () => {}
+    const timer = setTimeout(() => {
+      unsub()
+      resolve('pending')
+    }, timeoutMs)
+    unsub = useStore.subscribe((s) => {
+      const decision = read(s)
+      if (decision) {
+        clearTimeout(timer)
+        unsub()
+        resolve(decision)
+      }
+    })
+  })
+}
 
 // ---- layout conflicts ------------------------------------------------------
 
@@ -110,6 +146,14 @@ function roomSummary(state: AisleState): string {
   lines.push(
     `Room: ${formatFeet(state.venueDimensions.widthFt)} × ${formatFeet(state.venueDimensions.lengthFt)} · ${state.venueDimensions.snapFt > 0 ? `${formatFeet(state.venueDimensions.snapFt)} snap grid` : 'snapping off'}`,
   )
+  const ui = useStore.getState()
+  if (ui.proposal) {
+    lines.push(
+      `⏳ An agent proposal (${ui.proposal.moved} move${ui.proposal.moved === 1 ? '' : 's'}) is applied and awaiting the human's Keep/Revert decision.`,
+    )
+  }
+  const checkpointNames = Object.keys(ui.checkpoints)
+  if (checkpointNames.length) lines.push(`Checkpoints saved: ${checkpointNames.join(', ')} (restore_checkpoint returns to one).`)
   const units = stageUnitsPerFoot(state.venueDimensions)
   const room = roomRect(state.venueDimensions)
   lines.push(
@@ -214,6 +258,8 @@ const READ_GLANCES: Record<string, string> = {
   list_constraints: 'Reviewing the rules…',
   list_unseated: 'Counting empty seats…',
   list_violations: 'Checking for drama…',
+  get_chart_document: 'Compiling the seating list…',
+  explain_seating: 'Consulting the seating logic…',
 }
 
 function makeTool(
@@ -231,6 +277,8 @@ function makeTool(
     execute: async (rawArgs: unknown) => {
       const store = useStore.getState()
       store.setAgentConnected()
+      // Any tool call keeps the cursor parked on stage for the whole turn.
+      touchAgentSession()
       let args: Record<string, unknown> = {}
       if (typeof rawArgs === 'string') {
         try {
@@ -274,8 +322,16 @@ function makeTool(
       // the change out, so a burst of calls plays as one legible sequence
       // instead of everything snapping into place at once.
       await Promise.race([played, sleep(MAX_CHOREOGRAPHY_WAIT_MS)]).catch(() => undefined)
+      let text = result.text
+      if (result.finish && !result.isError) {
+        try {
+          text += await result.finish()
+        } catch {
+          // The base reply stands on its own.
+        }
+      }
       return {
-        content: [{ type: 'text', text: result.text }],
+        content: [{ type: 'text', text }],
         ...(result.isError ? { isError: true } : {}),
       }
     },
@@ -350,7 +406,7 @@ function baseTools(): WebTool[] {
     ),
     makeTool(
       'update_venue_dimensions',
-      'Set the real-world venue room width and length in feet, plus the movement snap grid. This calibrates the shared floor plan so amenity sizes and positions are reported in real measurements.',
+      'Set the real-world venue room width and length in feet, plus the movement snap grid. The floor plan is drawn to a fixed scale, so growing the room adds floor space around the existing furniture (which stays put); shrinking it nudges anything stranded outside back inside the walls.',
       obj({
         width_ft: { type: 'number', minimum: 20, maximum: 300, description: 'Inside room width in feet' },
         length_ft: { type: 'number', minimum: 15, maximum: 200, description: 'Inside room length in feet' },
@@ -398,6 +454,83 @@ function baseTools(): WebTool[] {
         }
         if (ids.length === 0) return ok('No guests match. The guest list may be empty — add_guest or import_guests will fix that.')
         return ok(`${ids.length} guest${ids.length === 1 ? '' : 's'}:\n${ids.map((id) => guestLine(state, state.guests[id])).join('\n')}`)
+      },
+      { readOnly: true },
+    ),
+    makeTool(
+      'explain_seating',
+      'Explain one guest’s seating in full: where they sit and with whom, every rule involving them with its live status (including how near or far their table actually is from the dance floor, band, or entrance), their group context, dietary needs, and notes. For an unseated guest: what to honor when choosing their seat, where their group sits, and which tables have space. Use it before moving someone — or when the human asks "why is she there?"',
+      obj({ guest: str('The guest to explain') }, ['guest']),
+      (args) => {
+        const state = getCore()
+        const r = resolveGuest(state, args.guest)
+        if ('err' in r) return fail(r.err)
+        const g = r.hit
+        const lines: string[] = []
+        const seat = state.seating[g.id]
+        if (g.rsvp === 'no') lines.push(`${g.name} (${g.group}) has declined — they will not be seated.`)
+        else if (seat) {
+          const table = state.tables[seat.tableId]
+          const mates = occupantsOf(state, seat.tableId).filter((id) => id !== g.id)
+          const groupMates = mates.filter((id) => state.guests[id].group === g.group)
+          lines.push(`${g.name} (${g.group}) sits at ${table.name}, seat ${seat.seat + 1} of ${table.seats}.`)
+          lines.push(
+            mates.length
+              ? `Tablemates: ${mates
+                  .map((id) => `${state.guests[id].name}${state.guests[id].group === g.group ? '' : ` (${state.guests[id].group})`}`)
+                  .join(', ')} — ${groupMates.length} of them from “${g.group}”.`
+              : 'They are alone at the table so far.',
+          )
+        } else {
+          lines.push(`${g.name} (${g.group}) is unseated, waiting in the lounge.`)
+          const groupCounts = new Map<string, number>()
+          for (const [gid, a] of Object.entries(state.seating)) {
+            if (state.guests[gid]?.group === g.group) groupCounts.set(a.tableId, (groupCounts.get(a.tableId) ?? 0) + 1)
+          }
+          const top = [...groupCounts.entries()].sort((a, b) => b[1] - a[1])[0]
+          if (top) lines.push(`Most of “${g.group}” sit at ${state.tables[top[0]]?.name} (${top[1]} of them).`)
+          const free = state.tableOrder
+            .map((id) => ({ t: state.tables[id], free: state.tables[id].seats - occupantsOf(state, id).length }))
+            .filter((x) => x.free > 0)
+          lines.push(free.length ? `Tables with space: ${free.map((x) => `${x.t.name} (${x.free})`).join(', ')}.` : 'No table has a free seat — add or enlarge one.')
+        }
+        const involved = state.constraints.filter((c) =>
+          c.type === 'zone' ? c.guestId === g.id : c.a === g.id || c.b === g.id,
+        )
+        if (involved.length === 0) lines.push('No seating rules involve them.')
+        else {
+          lines.push('Rules involving them:')
+          for (const c of involved) {
+            const status = constraintStatus(state, c)
+            const mark = status === 'ok' ? '✓' : status === 'violated' ? '⚠' : '…'
+            let detail = ''
+            if (c.type === 'together' || c.type === 'apart') {
+              const otherId = c.a === g.id ? c.b : c.a
+              const other = state.guests[otherId]
+              if (other) {
+                const os = state.seating[otherId]
+                detail = ` — ${other.name} is ${os ? `at ${state.tables[os.tableId]?.name}` : 'unseated'}`
+              }
+            } else if (seat) {
+              const bands = zoneBands(state, c.zone)
+              const d = bands.byTable[seat.tableId]
+              if (d !== undefined) {
+                const place =
+                  d <= bands.nearMax
+                    ? 'among the closest tables to'
+                    : d >= bands.farMin
+                      ? 'among the farthest tables from'
+                      : 'mid-distance from'
+                detail = ` — ${state.tables[seat.tableId].name} is ${place} ${state.venue[c.zone]?.label ?? c.zone}`
+              }
+            }
+            lines.push(`  ${mark} [${c.id}] ${constraintText(state, c)} (${status})${detail}${c.note ? ` — “${c.note}”` : ''}`)
+          }
+        }
+        if (g.dietary.length) lines.push(`Dietary: ${g.dietary.join(', ')}.`)
+        if (g.notes) lines.push(`Note: ${g.notes}`)
+        if (g.rsvp === 'pending') lines.push('RSVP is still pending.')
+        return ok(lines.join('\n'))
       },
       { readOnly: true },
     ),
@@ -565,12 +698,7 @@ function baseTools(): WebTool[] {
           const rb = resolveGuest(state, args.guest_b)
           if ('err' in rb) return fail(`Pair rules need guest_b too. ${rb.err}`)
           if (ra.hit.id === rb.hit.id) return fail('That is the same guest twice.')
-          const dup = state.constraints.find(
-            (c) =>
-              (c.type === 'together' || c.type === 'apart') &&
-              c.type === parsed.pair &&
-              ((c.a === ra.hit.id && c.b === rb.hit.id) || (c.a === rb.hit.id && c.b === ra.hit.id)),
-          )
+          const dup = findDuplicateRule(state, { type: parsed.pair, a: ra.hit.id, b: rb.hit.id })
           if (dup) return fail(`That rule already exists (${dup.id}).`)
           const c = useStore.getState().addConstraint({ type: parsed.pair, a: ra.hit.id, b: rb.hit.id, note })
           const status = constraintStatus(getCore(), c)
@@ -579,6 +707,13 @@ function baseTools(): WebTool[] {
             [ra.hit.id, rb.hit.id],
           )
         }
+        const zoneDup = findDuplicateRule(state, {
+          type: 'zone',
+          guestId: ra.hit.id,
+          zone: parsed.zone,
+          preference: parsed.preference,
+        })
+        if (zoneDup) return fail(`That rule already exists (${zoneDup.id}).`)
         const c = useStore.getState().addConstraint({
           type: 'zone',
           guestId: ra.hit.id,
@@ -636,6 +771,49 @@ function baseTools(): WebTool[] {
         )
       },
       { readOnly: true },
+    ),
+    makeTool(
+      'save_checkpoint',
+      'Save a named snapshot of the entire chart — guests, tables, seating, rules, venue — that restore_checkpoint can return to. Session-only (it does not survive a page reload). Use it before trying something bold: checkpoint, propose a daring layout, and if the human hates it, restore. Saving an existing name overwrites it.',
+      obj({ name: str('Checkpoint name, e.g. "before-bold-layout"; defaults to "checkpoint"') }),
+      (args) => {
+        const name = String(args.name ?? '').trim() || 'checkpoint'
+        useStore.getState().saveCheckpoint(name)
+        const state = getCore()
+        const attending = state.guestOrder.filter((id) => state.guests[id].rsvp !== 'no')
+        const seated = attending.filter((id) => state.seating[id])
+        return ok(
+          `Checkpoint “${name}” saved: ${seated.length} of ${attending.length} seated across ${state.tableOrder.length} tables, ${computeViolations(state).length} violations. restore_checkpoint returns to exactly this state.`,
+        )
+      },
+    ),
+    makeTool(
+      'restore_checkpoint',
+      'Restore the chart to a previously saved checkpoint — everything comes back: guests, tables, seating, rules, venue. The restore itself is undoable, and the checkpoint stays saved so you can return again. With no name given and exactly one checkpoint saved, that one is restored.',
+      obj({ name: str('Checkpoint name to restore') }),
+      (args) => {
+        const st = useStore.getState()
+        const names = Object.keys(st.checkpoints)
+        if (names.length === 0) return fail('No checkpoints saved yet — save_checkpoint creates one.')
+        let name = String(args.name ?? '').trim()
+        if (!name) {
+          if (names.length !== 1) return fail(`Which checkpoint? Saved: ${names.join(', ')}.`)
+          name = names[0]
+        }
+        if (!st.checkpoints[name]) return fail(`No checkpoint named “${name}”. Saved: ${names.join(', ')}.`)
+        const before = getCore()
+        const cp = st.restoreCheckpoint(name)!
+        const after = getCore()
+        const seatKey = (s: AisleState, id: string) =>
+          s.seating[id] ? `${s.seating[id].tableId}:${s.seating[id].seat}` : ''
+        const moved = after.guestOrder.filter((id) => seatKey(after, id) !== seatKey(before, id))
+        const seconds = Math.max(1, Math.round((Date.now() - cp.at) / 1000))
+        const age = seconds < 60 ? `${seconds}s` : `${Math.round(seconds / 60)} min`
+        return ok(
+          `Restored checkpoint “${name}” (saved ${age} ago). ${moved.length} guest${moved.length === 1 ? '' : 's'} changed seats; undo brings back what was there before the restore.`,
+          moved,
+        )
+      },
     ),
     makeTool(
       'load_sample_wedding',
@@ -804,6 +982,54 @@ function seatingTools(): WebTool[] {
       },
     ),
     makeTool(
+      'propose_arrangement',
+      'Like auto_arrange, but as a question rather than an act: computes the arrangement, plays it out on the chart as a live proposal, and shows the human a Keep / Revert banner. THIS CALL WAITS for the human to decide (up to ~30 seconds) and the reply tells you their verdict. If they have not decided yet, the reply says so — the proposal stays applied under its banner; any further edit quietly adopts it, and undo rejects it. Prefer this over auto_arrange for big rearrangements, so the human stays in charge of their own wedding.',
+      obj({
+        mode: str('"full" re-seats everyone; "repair" makes minimal fixes', { enum: ['full', 'repair'] }),
+      }),
+      (args) => {
+        const state = getCore()
+        const attending = state.guestOrder.filter((id) => state.guests[id].rsvp !== 'no')
+        if (attending.length === 0) return fail('There are no attending guests to seat. Add guests first.')
+        if (useStore.getState().proposal) {
+          return fail('A proposal is already awaiting the human’s decision — wait for their Keep/Revert before proposing again.')
+        }
+        const mode = args.mode === 'repair' ? 'repair' : 'full'
+        const before = state.seating
+        const result = autoArrange(state, { mode })
+        useStore.getState().applyArrangement(result.assignments)
+        const touched = attending.filter(
+          (id) => (before[id]?.tableId ?? '') !== (result.assignments[id]?.tableId ?? ''),
+        )
+        const tables = new Set(touched.map((id) => result.assignments[id]?.tableId).filter(Boolean) as string[])
+        if (touched.length === 0) {
+          // Nothing changed — no decision to ask for.
+          return ok(`${result.explanation}\n\nNothing needed to move, so there is nothing to propose.`)
+        }
+        const id = uid()
+        useStore.getState().beginProposal({
+          id,
+          summary: mode === 'repair' ? 'a minimal repair' : 'a fresh arrangement',
+          moved: touched.length,
+          beforeSeating: structuredClone(before),
+        })
+        return {
+          ...ok(
+            `Proposed to the human (${touched.length} move${touched.length === 1 ? '' : 's'}, awaiting their Keep/Revert):\n${result.explanation}`,
+            [...touched, ...tables],
+          ),
+          finish: () =>
+            waitForProposalDecision(id, PROPOSAL_WAIT_MS).then((decision) => {
+              if (decision === 'keep') return '\n\n✅ The human KEPT the proposal — it is now the arrangement.'
+              if (decision === 'revert') {
+                return '\n\n↩ The human REVERTED the proposal — the seating is back to how it was before this call. Ask what they would like changed, or try a different approach.'
+              }
+              return '\n\n⏳ The human has not decided yet. The proposal stays applied with its Keep/Revert banner on the chart; get_seating_chart will note it while it is pending.'
+            }),
+        }
+      },
+    ),
+    makeTool(
       'clear_seating',
       'Unseat everyone — the guest list, tables and rules stay. A blank canvas for auto_arrange.',
       obj({}),
@@ -845,6 +1071,99 @@ function seatingTools(): WebTool[] {
         return ok(
           `${violations.length} violation${violations.length === 1 ? '' : 's'} · drama: ${dramaLabel(score)} (${score})\n${violations.map((v) => `⚠ ${v.text}`).join('\n')}\nauto_arrange(mode:"repair") fixes these with minimal moves.${conflictBlock}`,
         )
+      },
+      { readOnly: true },
+    ),
+  ]
+}
+
+// ---- export tools ----------------------------------------------------------
+
+const EXPORT_SECTION_NAMES = ['floor_plan', 'seating_by_table', 'guest_directory', 'catering'] as const
+const EXPORT_SECTION_KEY: Record<(typeof EXPORT_SECTION_NAMES)[number], keyof ExportSections> = {
+  floor_plan: 'floorPlan',
+  seating_by_table: 'tables',
+  guest_directory: 'directory',
+  catering: 'catering',
+}
+const EXPORT_SECTION_LABEL: Record<string, string> = {
+  plan: 'floor plan',
+  tables: 'seating by table',
+  directory: 'guest directory',
+  catering: 'catering & dietary',
+}
+
+function exportTools(): WebTool[] {
+  return [
+    makeTool(
+      'export_chart',
+      'Compose the printed seating document and open the export studio on screen, pre-filled with your choices: a to-scale floor plan, per-table seating cards, an A–Z guest directory, and a catering & dietary summary — branded, paginated, with a live page preview. Set the masthead title, date, and venue, pick sections and paper size. The human reviews the preview and presses "Print · Save as PDF" — the one step an agent cannot press. For raw data instead of a printed document, use get_chart_document.',
+      obj({
+        title: str('Event title for the masthead, e.g. "June & Ravi"'),
+        date: str('Event date line, e.g. "Saturday, June 14, 2026"'),
+        venue: str('Venue name, e.g. "The Orchard House"'),
+        paper: str('Paper size', { enum: ['letter', 'a4'] }),
+        sections: {
+          type: 'array',
+          items: { type: 'string', enum: [...EXPORT_SECTION_NAMES] },
+          description: 'Exactly which sections to include; omit to keep the current composition (all sections by default)',
+        },
+      }),
+      (args) => {
+        const state = getCore()
+        if (state.guestOrder.length === 0 && state.tableOrder.length === 0) {
+          return fail('There is nothing to export yet — add guests or tables first.')
+        }
+        const options = { ...loadExportOptions(), sections: { ...loadExportOptions().sections } }
+        if (args.title !== undefined) options.eventTitle = String(args.title)
+        if (args.date !== undefined) options.eventDate = String(args.date)
+        if (args.venue !== undefined) options.venueName = String(args.venue)
+        if (args.paper !== undefined) {
+          if (args.paper !== 'letter' && args.paper !== 'a4') return fail('paper must be "letter" or "a4".')
+          options.paper = args.paper as PaperSize
+        }
+        if (args.sections !== undefined) {
+          if (!Array.isArray(args.sections) || args.sections.length === 0) {
+            return fail(`sections must be a non-empty array of: ${EXPORT_SECTION_NAMES.join(', ')}.`)
+          }
+          const bad = args.sections.filter((x) => !EXPORT_SECTION_NAMES.includes(String(x) as (typeof EXPORT_SECTION_NAMES)[number]))
+          if (bad.length) return fail(`Unknown section${bad.length === 1 ? '' : 's'}: ${bad.join(', ')}. Use: ${EXPORT_SECTION_NAMES.join(', ')}.`)
+          const wanted = new Set(args.sections.map(String))
+          for (const name of EXPORT_SECTION_NAMES) options.sections[EXPORT_SECTION_KEY[name]] = wanted.has(name)
+        }
+        saveExportOptions(options)
+        const model = buildDocModel(state, options)
+        if (model.pages.length === 0) {
+          return fail('None of the requested sections have anything to show yet (e.g. the guest directory needs attending guests).')
+        }
+        useStore.getState().requestExport()
+        const included = [...new Set(model.pages.map((p) => EXPORT_SECTION_LABEL[p.kind]))].join(', ')
+        const masthead = [model.displayTitle, model.dateLine, model.venueLine].filter(Boolean).join(' · ')
+        const skipped = EXPORT_SECTION_NAMES.filter((name) => {
+          const key = EXPORT_SECTION_KEY[name]
+          return options.sections[key] && !model.pages.some((p) => (p.kind === 'plan' ? key === 'floorPlan' : p.kind === key))
+        })
+        let text =
+          `The export studio is open with a live preview: ${model.pages.length} ${options.paper === 'a4' ? 'A4' : 'Letter'} page${model.pages.length === 1 ? '' : 's'} — ${included} — under the masthead “${masthead}”. ` +
+          `The human finishes by pressing “Print · Save as PDF”.`
+        if (skipped.length) text += ` (Skipped for now, nothing to show: ${skipped.map((s) => s.replace(/_/g, ' ')).join(', ')}.)`
+        if (model.stats.unseated > 0) text += ` Note: ${model.stats.unseated} attending guest${model.stats.unseated === 1 ? ' is' : 's are'} unseated and will print under “Not yet seated” — auto_arrange can fix that first.`
+        const violations = computeViolations(state)
+        if (violations.length > 0) text += ` ⚠ ${violations.length} seating rule${violations.length === 1 ? ' is' : 's are'} still broken; the document prints as-is.`
+        return ok(text)
+      },
+    ),
+    makeTool(
+      'get_chart_document',
+      'Return the seating chart as a portable document, without opening anything on screen. format "markdown" gives a per-table list with a dietary summary — ready to paste into an email to the caterer; format "csv" gives one spreadsheet row per guest (Guest, Group, RSVP, Dietary, Table, Seat). To hand the human a branded printable PDF instead, call export_chart.',
+      obj({
+        format: str('Document format (default "markdown")', { enum: ['markdown', 'csv'] }),
+      }),
+      (args) => {
+        const state = getCore()
+        if (state.guestOrder.length === 0) return fail('The guest list is empty — nothing to compile yet.')
+        const format = args.format === 'csv' ? 'csv' : 'markdown'
+        return ok(format === 'csv' ? chartCSV(state) : chartMarkdown(state))
       },
       { readOnly: true },
     ),
@@ -897,7 +1216,11 @@ function toolFlags(state: AisleState) {
   const attending = state.guestOrder.filter((id) => state.guests[id].rsvp !== 'no')
   const allSeated = attending.length > 0 && attending.every((id) => state.seating[id])
   const canFinalize = allSeated && computeViolations(state).length === 0
-  return { hasTables: state.tableOrder.length > 0, canFinalize }
+  return {
+    hasTables: state.tableOrder.length > 0,
+    hasContent: state.guestOrder.length > 0 || state.tableOrder.length > 0,
+    canFinalize,
+  }
 }
 
 export function currentTools(): WebTool[] {
@@ -905,6 +1228,7 @@ export function currentTools(): WebTool[] {
   return [
     ...baseTools(),
     ...(flags.hasTables ? seatingTools() : []),
+    ...(flags.hasContent ? exportTools() : []),
     ...(flags.canFinalize ? finalizeTools() : []),
   ]
 }
@@ -923,7 +1247,7 @@ export interface CatalogEntry {
   params: CatalogParam[]
   readOnly: boolean
   /** What has to be true of the chart for this tool to be registered. */
-  requires: 'always' | 'tables' | 'perfect'
+  requires: 'always' | 'tables' | 'content' | 'perfect'
   available: boolean
 }
 
@@ -956,6 +1280,7 @@ export function toolCatalog(): CatalogEntry[] {
   return [
     ...baseTools().map((t) => entry(t, 'always', true)),
     ...seatingTools().map((t) => entry(t, 'tables', flags.hasTables)),
+    ...exportTools().map((t) => entry(t, 'content', flags.hasContent)),
     ...finalizeTools().map((t) => entry(t, 'perfect', flags.canFinalize)),
   ]
 }
@@ -976,7 +1301,7 @@ export function initWebMCP(): void {
   let lastSig = ''
   useStore.subscribe((s) => {
     const flags = toolFlags(s)
-    const sig = `${flags.hasTables}|${flags.canFinalize}`
+    const sig = `${flags.hasTables}|${flags.hasContent}|${flags.canFinalize}`
     if (sig !== lastSig) {
       lastSig = sig
       apply()

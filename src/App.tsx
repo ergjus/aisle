@@ -1,13 +1,25 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useStore } from './store'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { Canvas } from './components/Canvas'
 import { Editors } from './components/Editors'
+import { readFirstRunGate, readOnboardingRecord } from './onboarding/storage'
+
+const OnboardingExperience = lazy(() => import('./onboarding/OnboardingExperience'))
 
 export default function App() {
   const toast = useStore((s) => s.toast)
   const setToast = useStore((s) => s.setToast)
+  const [initialFirstRun] = useState(() => {
+    const state = useStore.getState()
+    return readFirstRunGate(state.guestOrder.length > 0 || state.tableOrder.length > 0)
+  })
+  const [guideRequest, setGuideRequest] = useState(0)
+  const [loadOnboardingBundle, setLoadOnboardingBundle] = useState(() => {
+    const record = readOnboardingRecord()
+    return initialFirstRun || record?.challenge.status === 'active'
+  })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -32,12 +44,22 @@ export default function App() {
 
   return (
     <div className="grid h-screen grid-rows-[auto_minmax(0,1fr)]">
-      <Header />
+      <Header
+        onWelcomeGuide={() => {
+          setLoadOnboardingBundle(true)
+          setGuideRequest((request) => request + 1)
+        }}
+      />
       <div className="grid min-h-0 grid-cols-1 md:grid-cols-[248px_minmax(0,1fr)]">
         <Sidebar />
         <Canvas />
       </div>
       <Editors />
+      {loadOnboardingBundle ? (
+        <Suspense fallback={null}>
+          <OnboardingExperience initialFirstRun={initialFirstRun} guideRequest={guideRequest} />
+        </Suspense>
+      ) : null}
       {toast && (
         <div
           className="animate-in fade-in slide-in-from-bottom-2 fixed bottom-6 left-1/2 z-[80] max-w-[70vw] -translate-x-1/2 rounded-lg border border-gold/50 bg-pine-950/95 px-4 py-2 text-[13px] text-linen"

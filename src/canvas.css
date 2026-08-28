@@ -14,9 +14,15 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  cursor: grab;
   background:
     radial-gradient(1100px 720px at 54% 40%, rgba(236, 223, 195, 0.035), transparent 68%),
     var(--color-pine-900);
+}
+
+.canvas-wrap.panning,
+.canvas-wrap.panning .stage {
+  cursor: grabbing;
 }
 
 .canvas-zoom-controls {
@@ -57,6 +63,7 @@
   transform-origin: 0 0;
   background: transparent;
   user-select: none;
+  cursor: grab;
 }
 
 .room-frame {
@@ -84,6 +91,72 @@
   inset: 5px;
   border: 1px solid rgba(197, 165, 94, 0.16);
   border-radius: 10px;
+}
+
+.room-frame.resizing {
+  border-color: var(--color-gold-bright);
+  box-shadow:
+    0 0 0 1px rgba(232, 207, 143, 0.25),
+    0 14px 34px rgba(0, 0, 0, 0.22),
+    inset 0 0 38px rgba(5, 12, 8, 0.18);
+}
+
+/* Handles on the room's walls — drag to give the venue more (or less) feet,
+   mirroring how amenities resize. They sit on the frame's edge midpoints and
+   bottom-right corner, subtle until hovered or focused. --handle-scale is the
+   inverse of the camera zoom, so they stay grabbable at any zoom level. */
+.room-resize-handle {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%) scale(var(--handle-scale, 1));
+  border: 1px solid rgba(232, 207, 143, 0.55);
+  border-radius: 7px;
+  background: #223329;
+  color: var(--color-gold-bright);
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: 0 3px 9px rgba(5, 9, 6, 0.5);
+  opacity: 0.5;
+  transition: opacity 120ms ease, transform 120ms ease;
+  touch-action: none;
+}
+
+.room-resize-handle:hover,
+.room-resize-handle:focus-visible,
+.room-frame.resizing ~ .room-resize-handle {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(calc(var(--handle-scale, 1) * 1.1));
+}
+
+.room-resize-handle:focus-visible {
+  outline: 2px solid var(--color-gold-bright);
+  outline-offset: 3px;
+}
+
+.room-resize-handle.corner { cursor: nwse-resize; }
+.room-resize-handle.edge-e { cursor: ew-resize; }
+.room-resize-handle.edge-s { cursor: ns-resize; }
+
+.room-size-readout {
+  position: absolute;
+  z-index: 7;
+  transform: translate(-100%, -100%) scale(var(--handle-scale, 1));
+  transform-origin: 100% 100%;
+  border: 1px solid rgba(197, 165, 94, 0.4);
+  border-radius: 999px;
+  background: rgba(20, 31, 24, 0.94);
+  padding: 3px 9px;
+  color: var(--color-gold-bright);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .room-caption {
@@ -205,6 +278,14 @@
 
 .venue-feature.selected {
   box-shadow: 0 0 0 2px rgba(232, 207, 143, 0.88), 0 8px 20px rgba(5, 9, 6, 0.35);
+}
+
+/* Spotlight while a zone rule about this feature is hovered in the sidebar. */
+.venue-feature.rule-glow {
+  box-shadow:
+    0 0 0 3px rgba(232, 207, 143, 0.9),
+    0 0 22px 8px rgba(232, 207, 143, 0.35),
+    0 8px 20px rgba(5, 9, 6, 0.35);
 }
 
 .venue-feature.dragging .feature-move-surface,
@@ -853,6 +934,20 @@
   border-style: dashed;
 }
 
+/* Spotlight while a rule in the sidebar is hovered — this chip is one of the
+   guests that rule is about. */
+.chip.rule-glow {
+  z-index: 30;
+  box-shadow:
+    0 0 0 3px rgba(232, 207, 143, 0.95),
+    0 0 18px 6px rgba(232, 207, 143, 0.45),
+    0 3px 8px rgba(8, 13, 10, 0.5);
+}
+
+.chip.rule-glow .nametag {
+  opacity: 1;
+}
+
 .chip .viol-dot {
   position: absolute;
   right: -3px;
@@ -1001,6 +1096,26 @@
   transform-origin: 3px 3px;
   will-change: transform;
   filter: drop-shadow(0 3px 7px rgba(5, 9, 6, 0.55));
+  transition: filter 400ms ease;
+}
+
+/* Parked between actions while the agent's session is live — present, at rest. */
+.agent-cursor.idle {
+  filter: drop-shadow(0 3px 7px rgba(5, 9, 6, 0.55)) opacity(0.72);
+}
+
+.agent-cursor.idle .agent-cursor-pointer {
+  animation: cursor-breathe 3.2s ease-in-out infinite;
+}
+
+@keyframes cursor-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.93);
+  }
 }
 
 .agent-cursor-pointer {
@@ -1070,6 +1185,73 @@
 }
 
 /* ---- overlays: banner, hint, ribbon ----------------------------------------- */
+
+/* The agent's Keep/Revert proposal — a fixed chrome overlay on the canvas
+   wrap (never inside the zoomed stage), so it stays legible at any zoom. */
+.proposal-banner {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 190px);
+  background: linear-gradient(180deg, #dfc27a, var(--color-gold));
+  color: #241d10;
+  border: 1px solid rgba(140, 116, 51, 0.6);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 8px 6px 16px;
+  border-radius: 999px;
+  box-shadow: 0 8px 26px rgba(4, 9, 6, 0.5);
+  animation: entry-in 300ms ease;
+}
+
+.proposal-banner-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proposal-banner button {
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.proposal-banner button:hover {
+  transform: translateY(-1px);
+}
+
+.proposal-banner button:focus-visible {
+  outline: 2px solid var(--color-pine-950);
+  outline-offset: 1px;
+}
+
+.proposal-keep {
+  background: var(--color-pine-800);
+  color: var(--color-linen);
+}
+
+.proposal-keep:hover {
+  background: var(--color-pine-900);
+}
+
+.proposal-revert {
+  background: rgba(253, 250, 243, 0.72);
+  color: #5c4d22;
+}
+
+.proposal-revert:hover {
+  background: rgba(253, 250, 243, 0.95);
+}
 
 .viol-banner {
   position: absolute;

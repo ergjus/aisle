@@ -19,6 +19,29 @@ export function constraintText(state: AisleState, c: Constraint): string {
   }
 }
 
+/** A constraint that hasn't been given an id yet (Omit distributed over the union). */
+export type RuleDraft = Constraint extends infer C ? (C extends Constraint ? Omit<C, 'id'> : never) : never
+
+/** The existing rule a would-be rule duplicates, if any. Pair rules match in
+ *  either guest order; zone rules match on guest + zone + preference. Shared by
+ *  the sidebar composer and the agent's add_constraint tool. */
+export function findDuplicateRule(state: AisleState, candidate: RuleDraft): Constraint | undefined {
+  return state.constraints.find((c) => {
+    if (candidate.type === 'together' || candidate.type === 'apart') {
+      return (
+        c.type === candidate.type &&
+        ((c.a === candidate.a && c.b === candidate.b) || (c.a === candidate.b && c.b === candidate.a))
+      )
+    }
+    return (
+      c.type === 'zone' &&
+      c.guestId === candidate.guestId &&
+      c.zone === candidate.zone &&
+      c.preference === candidate.preference
+    )
+  })
+}
+
 export type ConstraintStatus = 'ok' | 'violated' | 'pending'
 
 /** pending = can't be judged yet because someone involved isn't seated. */

@@ -1,23 +1,32 @@
 import type { Table, VenueDimensions, VenueFeature, VenueFeatureId, ZoneId, AisleState } from './types'
 
-/** Logical stage size; the canvas scales to fit the viewport. It covers the
- *  zoomable room only — the lounge is a fixed footer rendered outside it, so
- *  zooming the room can never move or resize the lounge. */
-export const STAGE_W = 1240
-export const STAGE_H = 716
+/** Fixed floor-plan scale: one foot is always this many stage units. The room
+ *  grows and shrinks with its real dimensions on an endless pannable canvas —
+ *  the camera (pan + zoom) lives in Canvas.tsx, never in these coordinates. */
+export const UNITS_PER_FOOT = 20
 
-/** The actual venue floor. */
+/** Stage-space origin of the room's top-left corner. */
+export const ROOM_ORIGIN = { x: 20, y: 28 }
+
+/** Legacy fixed floor bounds — kept only for v1/v2 coordinate migrations and
+ *  the WebMCP legacy-unit schema hints. */
 export const ROOM = { x: 20, y: 28, w: 1200, h: 660 }
-
-/** Nominal stage-space anchor for the lounge, at the room's bottom edge — used
- *  only to aim the agent cursor's flight path; the lounge itself now renders
- *  as a fixed footer below the stage, not at these coordinates. */
-export const TRAY = { x: 20, y: 716, w: 872, h: 139 }
 
 export const DEFAULT_VENUE_DIMENSIONS: VenueDimensions = { widthFt: 60, lengthFt: 33, snapFt: 1 }
 
-/** Fits the true room aspect ratio inside the planning floor's maximum bounds. */
+/** The room's stage rectangle: its true size in feet at the fixed scale. */
 export function roomRect(dimensions: VenueDimensions) {
+  return {
+    x: ROOM_ORIGIN.x,
+    y: ROOM_ORIGIN.y,
+    w: dimensions.widthFt * UNITS_PER_FOOT,
+    h: dimensions.lengthFt * UNITS_PER_FOOT,
+  }
+}
+
+/** How v2 laid rooms out: aspect-fitted into the fixed ROOM bounds. Only the
+ *  v2→v3 persistence migration should ever need this. */
+export function legacyFittedRoomRect(dimensions: VenueDimensions) {
   const aspect = dimensions.widthFt / dimensions.lengthFt
   const maxAspect = ROOM.w / ROOM.h
   if (aspect >= maxAspect) {
@@ -26,6 +35,21 @@ export function roomRect(dimensions: VenueDimensions) {
   }
   const w = ROOM.h * aspect
   return { x: ROOM.x + (ROOM.w - w) / 2, y: ROOM.y, w, h: ROOM.h }
+}
+
+/** The stage covers the room plus its symmetric margins — everything the
+ *  camera can meaningfully frame. */
+export function stageSize(dimensions: VenueDimensions) {
+  const room = roomRect(dimensions)
+  return { w: room.x * 2 + room.w, h: room.y + room.h + 28 }
+}
+
+/** Stage-space anchor for the lounge, just below the room's bottom edge — used
+ *  only to aim the agent cursor's flight path; the lounge itself renders as a
+ *  fixed footer outside the stage, not at these coordinates. */
+export function trayRect(dimensions: VenueDimensions) {
+  const room = roomRect(dimensions)
+  return { x: room.x, y: room.y + room.h + 28, w: Math.min(872, room.w), h: 139 }
 }
 
 export const DEFAULT_VENUE: Record<VenueFeatureId, VenueFeature> = {
@@ -53,25 +77,8 @@ export const FEATURE_MIN_SIZE: Record<VenueFeatureId, { w: number; h: number }> 
   gift_table: { w: 125, h: 60 },
 }
 
-/** Keeps tables at a stable physical footprint when a room represents more or fewer feet. */
-export function tableVisualScale(dimensions: VenueDimensions = DEFAULT_VENUE_DIMENSIONS): number {
-  return Math.max(
-    0.28,
-    Math.min(
-      2.2,
-      DEFAULT_VENUE_DIMENSIONS.widthFt / dimensions.widthFt,
-      DEFAULT_VENUE_DIMENSIONS.lengthFt / dimensions.lengthFt,
-    ),
-  )
-}
-
-export function featureMinSize(id: VenueFeatureId, dimensions: VenueDimensions) {
-  const units = stageUnitsPerFoot(dimensions)
-  const baseUnits = stageUnitsPerFoot(DEFAULT_VENUE_DIMENSIONS)
-  return {
-    w: Math.max(42, FEATURE_MIN_SIZE[id].w * units.x / baseUnits.x),
-    h: Math.max(36, FEATURE_MIN_SIZE[id].h * units.y / baseUnits.y),
-  }
+export function featureMinSize(id: VenueFeatureId, _dimensions: VenueDimensions) {
+  return { ...FEATURE_MIN_SIZE[id] }
 }
 
 export function freshVenue(): Record<VenueFeatureId, VenueFeature> {
@@ -82,9 +89,8 @@ export function freshVenueDimensions(): VenueDimensions {
   return { ...DEFAULT_VENUE_DIMENSIONS }
 }
 
-export function stageUnitsPerFoot(dimensions: VenueDimensions) {
-  const room = roomRect(dimensions)
-  return { x: room.w / dimensions.widthFt, y: room.h / dimensions.lengthFt }
+export function stageUnitsPerFoot(_dimensions: VenueDimensions) {
+  return { x: UNITS_PER_FOOT, y: UNITS_PER_FOOT }
 }
 
 export function snapStageValue(value: number, axis: 'x' | 'y', dimensions: VenueDimensions): number {
@@ -112,15 +118,14 @@ export function zoneCenter(zone: VenueFeature) {
 
 export const CHIP_R = 15
 
-export function tableRadius(table: Table, dimensions: VenueDimensions = DEFAULT_VENUE_DIMENSIONS): number {
+export function tableRadius(table: Table, _dimensions: VenueDimensions = DEFAULT_VENUE_DIMENSIONS): number {
   if (table.shape === 'rect') return 0
-  return Math.max(40, 30 + table.seats * 2.6) * tableVisualScale(dimensions)
+  return Math.max(40, 30 + table.seats * 2.6)
 }
 
-export function rectTableSize(table: Table, dimensions: VenueDimensions = DEFAULT_VENUE_DIMENSIONS): { w: number; h: number } {
-  const scale = tableVisualScale(dimensions)
+export function rectTableSize(table: Table, _dimensions: VenueDimensions = DEFAULT_VENUE_DIMENSIONS): { w: number; h: number } {
   const perSide = Math.ceil((table.seats - 2) / 2)
-  return { w: Math.max(100, perSide * 40 + 36) * scale, h: 62 * scale }
+  return { w: Math.max(100, perSide * 40 + 36), h: 62 }
 }
 
 /** Position of seat i around a table, in stage coordinates. */
@@ -235,11 +240,12 @@ export function tableFootprint(table: Table, dimensions: VenueDimensions = DEFAU
   return w / 2 + CHIP_R * 2 + 10
 }
 
-export function trayPos(index: number): { x: number; y: number } {
-  const perRow = Math.floor((TRAY.w - 50) / 34)
+export function trayPos(index: number, dimensions: VenueDimensions = DEFAULT_VENUE_DIMENSIONS): { x: number; y: number } {
+  const tray = trayRect(dimensions)
+  const perRow = Math.max(1, Math.floor((tray.w - 50) / 34))
   const col = index % perRow
   const row = Math.floor(index / perRow)
-  return { x: TRAY.x + 36 + col * 34, y: TRAY.y + 38 + row * 32 }
+  return { x: tray.x + 36 + col * 34, y: tray.y + 38 + row * 32 }
 }
 
 export function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
@@ -258,7 +264,7 @@ export function chipPositions(state: AisleState): Record<string, { x: number; y:
     if (state.guests[id].rsvp === 'no') continue
     const seat = state.seating[id]
     if (seat && state.tables[seat.tableId]) pos[id] = seatPos(state.tables[seat.tableId], seat.seat, state.venueDimensions)
-    else pos[id] = trayPos(trayIndex++)
+    else pos[id] = trayPos(trayIndex++, state.venueDimensions)
   }
   return pos
 }
@@ -286,9 +292,8 @@ export function zoneBands(state: AisleState, zoneId: ZoneId) {
 export function findFreeSpot(state: AisleState): { x: number; y: number } {
   const candidates: { x: number; y: number }[] = []
   const room = roomRect(state.venueDimensions)
-  const furnitureScale = tableVisualScale(state.venueDimensions)
-  const gapX = Math.max(72, 120 * furnitureScale)
-  const gapY = Math.max(68, 95 * furnitureScale)
+  const gapX = 120
+  const gapY = 95
   for (let y = room.y + 100; y <= room.y + room.h - 55; y += gapY) {
     for (let x = room.x + 90; x <= room.x + room.w - 75; x += gapX) {
       candidates.push({ x, y })
@@ -296,9 +301,9 @@ export function findFreeSpot(state: AisleState): { x: number; y: number } {
   }
   for (const c of candidates) {
     const tableClash = state.tableOrder.some(
-      (id) => dist(state.tables[id], c) < tableFootprint(state.tables[id], state.venueDimensions) + 64 * furnitureScale,
+      (id) => dist(state.tables[id], c) < tableFootprint(state.tables[id], state.venueDimensions) + 64,
     )
-    const featureMargin = Math.max(45, 85 * furnitureScale)
+    const featureMargin = 85
     const featureClash = Object.values(state.venue).some(
       (feature) =>
         feature.enabled &&

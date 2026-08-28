@@ -1,17 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, animate, motion, useMotionValue } from 'motion/react'
-import { STAGE_H, STAGE_W } from '../geometry'
+import { roomRect } from '../geometry'
+import { useStore } from '../store'
 import {
   nextPerformance,
   onPerformance,
   queuedCount,
+  sessionRemainingMs,
   setCursorPlaying,
   type CursorStep,
 } from '../agentCursor'
 
-// Long enough that the cursor stays on stage across an agent's think-act
-// rhythm instead of vanishing between consecutive tool calls.
-const IDLE_FADE_MS = 6000
 const EASE_TRAVEL: [number, number, number, number] = [0.3, 0.7, 0.35, 1]
 
 function sleep(ms: number): Promise<void> {
@@ -27,13 +26,15 @@ let rippleSeq = 0
  * Position runs on motion values, so nothing re-renders per frame.
  */
 export function AgentCursor() {
-  const x = useMotionValue(STAGE_W / 2)
-  const y = useMotionValue(STAGE_H / 2)
+  const initialRoom = roomRect(useStore.getState().venueDimensions)
+  const x = useMotionValue(initialRoom.x + initialRoom.w / 2)
+  const y = useMotionValue(initialRoom.y + initialRoom.h / 2)
   const scale = useMotionValue(0)
 
   const [visible, setVisible] = useState(false)
   const [label, setLabel] = useState<string | null>(null)
   const [carrying, setCarrying] = useState(false)
+  const [idle, setIdle] = useState(false)
   const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([])
 
   const runningRef = useRef(false)
@@ -63,6 +64,33 @@ export function AgentCursor() {
       if (step.holdMs) await sleep(step.holdMs * rush)
     }
 
+    const bowOut = () => {
+      setIdle(false)
+      setLabel(null)
+      setVisible(false)
+      void animate(scale, 0, { duration: 0.3, ease: 'easeIn' })
+    }
+
+    // Parked between acts: while the agent's session is alive the cursor stays
+    // on stage (last bubble still up), settling into an idle rest. It bows out
+    // only once the tools have gone quiet long enough to call the turn over.
+    const park = () => {
+      clearTimeout(hideTimer.current)
+      if (!aliveRef.current) return
+      const remaining = sessionRemainingMs()
+      if (remaining <= 0) {
+        bowOut()
+        return
+      }
+      setIdle(true)
+      if (scale.get() < 0.05) {
+        // A session began before any performance — appear where we stand.
+        setVisible(true)
+        void animate(scale, 1, { type: 'spring', stiffness: 320, damping: 22 })
+      }
+      hideTimer.current = setTimeout(park, remaining + 50)
+    }
+
     const run = async () => {
       if (runningRef.current) return
       runningRef.current = true
@@ -70,16 +98,16 @@ export function AgentCursor() {
       clearTimeout(hideTimer.current)
       let perf
       while (aliveRef.current && (perf = nextPerformance())) {
+        setIdle(false)
         const hidden = scale.get() < 0.05
-        if (perf.onlyIfVisible && hidden) {
-          perf.done?.()
-          continue
-        }
         if (hidden) {
-          // Materialize a short hop away from the first stop and glide in.
           const first = perf.steps[0]
-          x.jump(Math.min(first.x + 80, STAGE_W - 30))
-          y.jump(Math.min(first.y + 110, STAGE_H - 20))
+          if (!first.stay) {
+            // Materialize a short hop away from the first stop and glide in.
+            const room = roomRect(useStore.getState().venueDimensions)
+            x.jump(Math.min(first.x + 80, room.x + room.w - 10))
+            y.jump(Math.min(first.y + 110, room.y + room.h + 8))
+          }
           void animate(scale, 1, { type: 'spring', stiffness: 320, damping: 22 })
           setVisible(true)
         }
@@ -96,13 +124,7 @@ export function AgentCursor() {
       setCarrying(false)
       setCursorPlaying(false)
       runningRef.current = false
-      if (aliveRef.current) {
-        hideTimer.current = setTimeout(() => {
-          setLabel(null)
-          setVisible(false)
-          void animate(scale, 0, { duration: 0.3, ease: 'easeIn' })
-        }, IDLE_FADE_MS)
-      }
+      if (aliveRef.current) park()
     }
 
     const unsubscribe = onPerformance(() => void run())
@@ -121,7 +143,7 @@ export function AgentCursor() {
         <span key={r.id} className="agent-ripple" style={{ left: r.x, top: r.y }} />
       ))}
       <motion.div
-        className={`agent-cursor${carrying ? ' carrying' : ''}`}
+        className={`agent-cursor${carrying ? ' carrying' : ''}${idle ? ' idle' : ''}`}
         style={{ x, y, scale, opacity: scale }}
         aria-hidden="true"
       >

@@ -1,5 +1,5 @@
 import type { AisleState, VenueFeatureId } from './types'
-import { TRAY, chipPositions, roomRect } from './geometry'
+import { chipPositions, roomRect, trayRect } from './geometry'
 
 /*
  * Agent cursor choreography.
@@ -27,8 +27,6 @@ export interface CursorStep {
 
 export interface CursorPerformance {
   steps: CursorStep[]
-  /** Drop silently if the cursor is not currently on stage (read-only glances). */
-  onlyIfVisible?: boolean
   /** Timed to match delayed chip transitions — never rushed or dropped. */
   synced?: boolean
   /** Resolves the enqueuer's promise once played (or dropped/skipped). */
@@ -128,6 +126,28 @@ export function onPerformance(listener: () => void): () => void {
   return () => {
     if (wake === listener) wake = null
   }
+}
+
+// ---- agent session ----------------------------------------------------------
+
+/** How long after the last tool call the agent's turn is considered over. */
+const SESSION_IDLE_MS = 60_000
+
+let sessionUntil = 0
+
+/**
+ * Every tool call — reads included — keeps the agent's session alive. The
+ * cursor stays parked on stage between actions for the whole turn and only
+ * bows out once the tools have gone quiet this long; the next prompt's first
+ * tool call brings it back.
+ */
+export function touchAgentSession(): void {
+  sessionUntil = Date.now() + SESSION_IDLE_MS
+  wake?.()
+}
+
+export function sessionRemainingMs(): number {
+  return Math.max(0, sessionUntil - Date.now())
 }
 
 // ---- chip departure delays --------------------------------------------------
@@ -257,7 +277,8 @@ export function choreograph(opts: {
     }
     const toLounge = moved.filter((id) => !after.seating[id])
     if (toLounge.length) {
-      groups.push({ x: TRAY.x + TRAY.w / 2, y: TRAY.y - 26, label: 'Back to the lounge', ids: toLounge })
+      const tray = trayRect(after.venueDimensions)
+      groups.push({ x: tray.x + tray.w / 2, y: tray.y - 26, label: 'Back to the lounge', ids: toLounge })
     }
     const perStop = Math.min(1500, Math.max(700, STAGED_TOTAL_MS / groups.length))
     const fly = Math.round(perStop * 0.45)
@@ -310,10 +331,10 @@ export function choreograph(opts: {
   return Promise.all(waits).then(() => undefined)
 }
 
-/** A label-only beat where the cursor already is — used for read-only tools. */
+/** A label-only beat where the cursor stands (materializing it if needed) —
+ *  read-only tools narrate through this, so thinking is visible too. */
 export function glance(label: string): void {
-  enqueuePerformance({
-    steps: [{ x: 0, y: 0, stay: true, label, gesture: 'point', holdMs: 1000 }],
-    onlyIfVisible: true,
+  void enqueuePerformance({
+    steps: [{ x: 0, y: 0, stay: true, label, gesture: 'point', holdMs: 1200 }],
   })
 }

@@ -184,3 +184,291 @@
     background: transparent;
   }
 }
+
+/* ---- first-run welcome and reusable coach marks ------------------------- */
+
+.welcome-dialog {
+  z-index: 100;
+  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  translate: none;
+  transform: none;
+  overflow: hidden;
+  border-radius: 0;
+  padding: 0;
+  background:
+    radial-gradient(circle at 50% 26%, color-mix(in srgb, var(--color-gold) 17%, transparent), transparent 32%),
+    linear-gradient(145deg, var(--color-pine-950), var(--color-pine-900) 58%, #16251c);
+  color: var(--color-linen);
+  box-shadow: none;
+}
+
+.welcome-intro,
+.welcome-reveal {
+  position: relative;
+  display: flex;
+  width: min(920px, calc(100vw - 40px));
+  height: 100%;
+  margin: 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  overflow-y: auto;
+  padding: 40px 0;
+  text-align: center;
+}
+
+.welcome-kicker,
+.welcome-coach-kicker {
+  color: var(--color-gold-bright);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.welcome-intro h2,
+.welcome-reveal h2 {
+  max-width: 780px;
+  font-family: var(--font-heading);
+  font-size: clamp(38px, 6vw, 72px);
+  font-weight: 500;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.welcome-deck {
+  max-width: 620px;
+  color: color-mix(in srgb, var(--color-linen) 76%, transparent);
+  font-size: 15px;
+  line-height: 1.65;
+  text-wrap: balance;
+}
+
+.welcome-candle {
+  position: relative;
+  width: 28px;
+  height: 58px;
+  border-radius: 12px 12px 4px 4px;
+  background: linear-gradient(90deg, #ddc98f, #fff3c9 48%, #c8a963);
+  box-shadow: 0 0 50px color-mix(in srgb, var(--color-gold-bright) 36%, transparent);
+}
+
+.welcome-candle span {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 3px);
+  width: 15px;
+  height: 26px;
+  transform: translateX(-50%);
+  transform-origin: 50% 100%;
+  border-radius: 55% 45% 52% 48%;
+  background: radial-gradient(circle at 50% 67%, #fff7c8, #e8ad45 52%, #b85b2a 75%);
+  filter: drop-shadow(0 0 12px rgba(232, 173, 69, 0.7));
+  animation: welcome-flame 2.2s ease-in-out infinite alternate;
+}
+
+@keyframes welcome-flame {
+  from { transform: translateX(-50%) rotate(-2deg) scale(0.96, 1.03); }
+  to { transform: translateX(-50%) rotate(2deg) scale(1.04, 0.96); }
+}
+
+.welcome-sketch {
+  width: min(520px, 80vw);
+  color: var(--color-gold-bright);
+}
+
+.welcome-sketch svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.welcome-sketch-room,
+.welcome-sketch-detail,
+.welcome-sketch-table,
+.welcome-sketch-flourish {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  stroke-dasharray: 1400;
+  stroke-dashoffset: 1400;
+  animation: welcome-draw 1.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.welcome-sketch-detail { opacity: 0.52; animation-delay: 120ms; }
+.welcome-sketch-table { opacity: 0.8; animation-delay: 260ms; }
+.welcome-sketch-flourish { stroke-width: 1.5; animation-delay: 460ms; }
+
+@keyframes welcome-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+.welcome-intro-actions,
+.welcome-coach-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.welcome-intro-actions [data-slot='button']:first-child,
+.welcome-reveal > [data-slot='button'] {
+  background: var(--color-gold);
+  color: var(--color-pine-950);
+}
+
+.welcome-intro-actions [data-slot='button']:last-child {
+  color: var(--color-linen);
+}
+
+.welcome-questionnaire-shell {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  overflow-y: auto;
+  padding: 28px;
+}
+
+.welcome-questionnaire-shell [data-slot='questionnaire'] {
+  width: min(820px, 100%);
+}
+
+.welcome-card {
+  width: 100%;
+  max-height: calc(100dvh - 56px);
+  overflow-y: auto;
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(232, 207, 143, 0.16);
+}
+
+.welcome-card [data-slot='card-title'] {
+  font-size: clamp(26px, 4vw, 42px);
+  font-weight: 500;
+  line-height: 1.05;
+}
+
+.welcome-card [data-slot='card-footer'] {
+  position: sticky;
+  bottom: calc(-1 * var(--card-spacing));
+  background: linear-gradient(transparent, var(--color-card) 20%);
+  padding-top: var(--card-spacing);
+  padding-bottom: 2px;
+}
+
+.welcome-sparkles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.welcome-sparkles span {
+  position: absolute;
+  top: 48%;
+  color: var(--color-gold-bright);
+  font-size: 16px;
+}
+
+.welcome-coach {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 70;
+  display: flex;
+  width: min(380px, calc(100vw - 32px));
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-gold) 58%, var(--color-border));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-card) 96%, transparent);
+  padding: 18px;
+  color: var(--color-foreground);
+  box-shadow: 0 22px 64px rgba(4, 10, 6, 0.34);
+  backdrop-filter: blur(14px);
+}
+
+.welcome-coach-top {
+  top: 76px;
+  bottom: auto;
+}
+
+.welcome-coach h2 {
+  font-family: var(--font-heading);
+  font-size: 25px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.welcome-coach p:not(.welcome-coach-kicker) {
+  color: var(--color-muted-foreground);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.welcome-coach-actions {
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.welcome-coach-complete > svg {
+  color: var(--color-gold-ink);
+}
+
+.welcome-tour-highlight {
+  position: relative;
+  outline: 3px solid var(--color-gold-bright) !important;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 9px color-mix(in srgb, var(--color-gold) 20%, transparent), 0 0 34px color-mix(in srgb, var(--color-gold) 28%, transparent) !important;
+}
+
+@media (max-width: 640px) {
+  .welcome-intro,
+  .welcome-reveal {
+    width: calc(100vw - 28px);
+    justify-content: flex-start;
+    gap: 14px;
+    padding: 36px 0 24px;
+  }
+
+  .welcome-intro h2,
+  .welcome-reveal h2 { font-size: 41px; }
+  .welcome-deck { font-size: 14px; }
+  .welcome-sketch { width: min(430px, 92vw); }
+  .welcome-questionnaire-shell { align-items: start; padding: 12px; }
+  .welcome-card { max-height: calc(100dvh - 24px); }
+  .welcome-coach { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
+  .welcome-coach-top { top: 66px; bottom: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-candle span,
+  .welcome-sketch-room,
+  .welcome-sketch-detail,
+  .welcome-sketch-table,
+  .welcome-sketch-flourish {
+    animation: none;
+  }
+
+  .welcome-sketch-room,
+  .welcome-sketch-detail,
+  .welcome-sketch-table,
+  .welcome-sketch-flourish {
+    stroke-dashoffset: 0;
+  }
+
+  .welcome-tour-highlight { transition: none; }
+}

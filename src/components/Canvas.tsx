@@ -5,8 +5,6 @@ import { useStore } from '../store'
 import type { Guest, Table, VenueDimensions, VenueFeature, VenueFeatureId } from '../types'
 import {
   CHIP_R,
-  STAGE_H,
-  STAGE_W,
   chipPositions,
   dist,
   featureBounds,
@@ -18,6 +16,7 @@ import {
   roomRect,
   seatPos,
   snapStageValue,
+  stageSize,
   stageUnitsPerFoot,
   tableBodyBounds,
   tableFootprint,
@@ -32,7 +31,7 @@ import { seatEveryone } from '../actions'
 import { Button } from '@/components/ui/button'
 
 interface DragState {
-  kind: 'chip' | 'table' | 'feature' | 'resize-feature' | 'rotate-feature' | 'rotate-table'
+  kind: 'chip' | 'table' | 'feature' | 'resize-feature' | 'rotate-feature' | 'rotate-table' | 'resize-venue'
   id: string
   x: number
   y: number
@@ -44,7 +43,23 @@ interface DragState {
   layoutOrigins?: LayoutOrigin[]
   startAngle?: number
   startRotation?: number
+  /** Which wall(s) a resize-venue drag pulls on. */
+  axis?: 'x' | 'y' | 'both'
 }
+
+/** The camera over the endless canvas: screen-pixel pan offset plus zoom. */
+interface ViewState {
+  x: number
+  y: number
+  scale: number
+}
+
+const MIN_SCALE = 0.05
+const MAX_SCALE = 3
+/** Auto-fit never zooms a tiny room into a comically huge one. */
+const FIT_MAX_SCALE = 1.6
+/** Panning always keeps at least this many screen pixels of room visible. */
+const PAN_MARGIN = 80
 
 type LayoutKind = 'table' | 'feature'
 interface LayoutItem { kind: LayoutKind; id: string }
@@ -88,13 +103,15 @@ function Chip(props: {
   dragging: boolean
   selected: boolean
   violated: boolean
+  /** Spotlit because the user is hovering a rule involving this guest. */
+  highlighted?: boolean
   touchedAt: number | undefined
   staggerMs: number
   whereLabel: string
   onPointerDown: (e: React.PointerEvent) => void
   onKeyDown: (e: React.KeyboardEvent) => void
 }) {
-  const { guest, x, y, layout, color, dragging, selected, violated, touchedAt, staggerMs, whereLabel } = props
+  const { guest, x, y, layout, color, dragging, selected, violated, highlighted, touchedAt, staggerMs, whereLabel } = props
   // A fresh touchedAt remounts the keyed overlays, replaying their one-shot
   // CSS animations. No JS timers: fill-mode ends them, so nothing can stick.
   const flashing = touchedAt !== undefined && Date.now() - touchedAt < 4000
@@ -117,7 +134,7 @@ function Chip(props: {
   const isFlow = layout === 'flow'
   const [flowHovered, setFlowHovered] = useState(false)
   const [tagPos, setTagPos] = useState<{ left: number; top: number } | null>(null)
-  const showFlowTag = isFlow && (flowHovered || selected)
+  const showFlowTag = isFlow && (flowHovered || selected || highlighted)
 
   useEffect(() => {
     if (!showFlowTag || !rootRef.current) {
@@ -133,6 +150,7 @@ function Chip(props: {
     isFlow && 'flow',
     dragging && 'dragging',
     selected && 'selected',
+    highlighted && 'rule-glow',
     guest.rsvp === 'pending' && 'rsvp-pending',
   ]
     .filter(Boolean)
@@ -148,6 +166,7 @@ function Chip(props: {
         transitionDelay: dragging ? '0ms' : `${staggerMs}ms`,
       }}
       role="button"
+      data-tour-guest={guest.id}
       tabIndex={0}
       aria-label={`${guest.name} — ${whereLabel}${violated ? ' — part of a broken rule' : ''}. Press Enter to edit.`}
       onKeyDown={props.onKeyDown}
@@ -206,12 +225,16 @@ function readPersistedBool(key: string, fallback: boolean): boolean {
 export function Canvas() {
   const s = useStore()
   const wrapRef = useRef<HTMLDivElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
   const loungeRef = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 800, h: 600 })
   const [drag, setDrag] = useState<DragState | null>(null)
   const [layoutSelection, setLayoutSelection] = useState<LayoutItem[]>([])
   const [guides, setGuides] = useState<{ x?: number; y?: number }>({})
-  const [zoom, setZoom] = useState(1)
+  /** null = auto-fit: the camera follows the room until the user pans/zooms. */
+  const [viewState, setViewState] = useState<ViewState | null>(null)
+  const [panning, setPanning] = useState(false)
+  const panDrag = useRef<{ startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null)
   const [loungeHeight, setLoungeHeightState] = useState(() => readPersistedNumber('aisle:lounge:height', LOUNGE_DEFAULT_H))
   const [loungeCollapsed, setLoungeCollapsedState] = useState(() => readPersistedBool('aisle:lounge:collapsed', false))
   const [loungeResizing, setLoungeResizing] = useState(false)
@@ -258,14 +281,82 @@ export function Canvas() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // The room stage only ever fits into the space above the lounge footer —
+  // The room stage only ever frames into the space above the lounge footer —
   // the footer itself is a fixed-height sibling, never part of the zoomed
   // transform, so it can't be pushed around or resized by zooming.
   const roomAvailH = Math.max(0, box.h - loungeH)
-  const fitScale = Math.min(box.w / STAGE_W, roomAvailH / STAGE_H)
-  const scale = fitScale * zoom
-  const ox = (box.w - STAGE_W * scale) / 2
-  const oy = (roomAvailH - STAGE_H * scale) / 2
+  const room = roomRect(s.venueDimensions)
+  const stageDims = stageSize(s.venueDimensions)
+
+  const computeFitView = (): ViewState => {
+    const pad = 48
+    const raw = Math.min((box.w - pad * 2) / room.w, (roomAvailH - pad * 2) / room.h)
+    const fit = Math.max(MIN_SCALE, Math.min(FIT_MAX_SCALE, Number.isFinite(raw) && raw > 0 ? raw : 1))
+    return {
+      x: (box.w - room.w * fit) / 2 - room.x * fit,
+      y: (roomAvailH - room.h * fit) / 2 - room.y * fit,
+      scale: fit,
+    }
+  }
+
+  // While un-touched the camera keeps auto-fitting (window resizes, room
+  // resizes, lounge drags all re-frame); the first pan or zoom pins it.
+  const view = viewState ?? computeFitView()
+  const scale = view.scale
+  const ox = view.x
+  const oy = view.y
+
+  const clampView = (v: ViewState): ViewState => {
+    const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale))
+    const clampAxis = (value: number, lo: number, hi: number) =>
+      Math.max(Math.min(lo, hi), Math.min(Math.max(lo, hi), value))
+    return {
+      scale: clampedScale,
+      x: clampAxis(v.x, PAN_MARGIN - (room.x + room.w) * clampedScale, box.w - PAN_MARGIN - room.x * clampedScale),
+      y: clampAxis(v.y, PAN_MARGIN - (room.y + room.h) * clampedScale, roomAvailH - PAN_MARGIN - room.y * clampedScale),
+    }
+  }
+
+  const zoomAt = (clientX: number, clientY: number, factor: number) => {
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const nextScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, view.scale * factor))
+    const k = nextScale / view.scale
+    const px = clientX - rect.left
+    const py = clientY - rect.top
+    setViewState(clampView({ scale: nextScale, x: px - (px - view.x) * k, y: py - (py - view.y) * k }))
+  }
+
+  const panBy = (dx: number, dy: number) => {
+    setViewState(clampView({ scale: view.scale, x: view.x + dx, y: view.y + dy }))
+  }
+
+  const zoomStep = (factor: number) => {
+    const rect = wrapRef.current?.getBoundingClientRect()
+    if (!rect) return
+    zoomAt(rect.left + box.w / 2, rect.top + roomAvailH / 2, factor)
+  }
+
+  // Wheel must be a native non-passive listener: React registers wheel
+  // passively, and pinch-zoom (ctrl+wheel) has to preventDefault or the
+  // browser zooms the whole page instead of the floor plan.
+  const cameraRef = useRef({ zoomAt, panBy })
+  cameraRef.current = { zoomAt, panBy }
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const unit = e.deltaMode === 1 ? 16 : 1
+      if (e.ctrlKey || e.metaKey) {
+        cameraRef.current.zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * unit * 0.0022))
+      } else {
+        cameraRef.current.panBy(-e.deltaX * unit, -e.deltaY * unit)
+      }
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
 
   const colors = useMemo(() => groupColors(s), [s.guests, s.guestOrder])
   const violations = useMemo(() => computeViolations(s), [s.guests, s.tables, s.seating, s.constraints, s.tableOrder, s.guestOrder, s.venue])
@@ -323,7 +414,6 @@ export function Canvas() {
   })
 
   const unseatedCount = unseatedAttending.length
-  const room = roomRect(s.venueDimensions)
   const unitsPerFoot = stageUnitsPerFoot(s.venueDimensions)
 
   const collisions = useMemo(() => {
@@ -381,10 +471,14 @@ export function Canvas() {
     kind: DragState['kind'],
     id: string,
     stagePos: { x: number; y: number },
+    axis?: DragState['axis'],
   ) => {
     if (e.button !== 0) return
     e.stopPropagation()
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
+    // Resizing the room while the camera auto-fits would re-frame every frame
+    // and pull the wall away from the pointer — pin the camera where it is.
+    if (kind === 'resize-venue' && viewState === null) setViewState(view)
     let layoutOrigins: LayoutOrigin[] | undefined
     if (kind === 'table' || kind === 'feature') {
       const item = { kind, id } as LayoutItem
@@ -407,6 +501,7 @@ export function Canvas() {
       snapshotTaken: false,
       target: null,
       layoutOrigins,
+      axis,
     })
   }
 
@@ -499,6 +594,14 @@ export function Canvas() {
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
+    const p = panDrag.current
+    if (p) {
+      const pdx = e.clientX - p.startX
+      const pdy = e.clientY - p.startY
+      if (!p.moved && Math.hypot(pdx, pdy) > 3) p.moved = true
+      if (p.moved) setViewState(clampView({ scale: view.scale, x: p.originX + pdx, y: p.originY + pdy }))
+      return
+    }
     const d = dragRef.current
     if (!d) return
     const dx = e.clientX - d.startClient.x
@@ -540,12 +643,29 @@ export function Canvas() {
       const h = Math.max(min.h, Math.min(room.y + room.h - feature.y - 8, snappedH))
       s.updateVenueFeature(feature.id, { w, h }, { snapshot: false })
       setDrag({ ...d, x: w, y: h, moved: true, snapshotTaken: true })
+    } else if (d.kind === 'resize-venue') {
+      const pointer = toStage(e.clientX, e.clientY)
+      if (!d.snapshotTaken) s.snapshot('resize room')
+      const step = e.altKey ? 0.5 : 1
+      const patch: Partial<VenueDimensions> = {}
+      if (d.axis !== 'y') patch.widthFt = Math.round((pointer.x - room.x) / unitsPerFoot.x / step) * step
+      if (d.axis !== 'x') patch.lengthFt = Math.round((pointer.y - room.y) / unitsPerFoot.y / step) * step
+      s.updateVenueDimensions(patch, { snapshot: false })
+      setDrag({ ...d, moved: true, snapshotTaken: true })
     } else {
       setDrag({ ...d, x, y, moved: true, target: dropTargetAt({ x, y }, { x: e.clientX, y: e.clientY }) })
     }
   }
 
   const onPointerUp = (e: React.PointerEvent) => {
+    if (panDrag.current) {
+      // A background press that never moved is a click: clear the selection,
+      // exactly as clicking the empty floor always did.
+      if (!panDrag.current.moved && e.button === 0) setLayoutSelection([])
+      panDrag.current = null
+      setPanning(false)
+      return
+    }
     const d = dragRef.current
     if (!d) return
     setDrag(null)
@@ -604,54 +724,102 @@ export function Canvas() {
     } else if (d.kind === 'resize-feature' && d.moved) {
       const feature = s.venue[d.id as VenueFeatureId]
       s.logActivity('venue', `Resized ${feature?.label} to ${Math.round(feature?.w ?? 0)} × ${Math.round(feature?.h ?? 0)}.`, 'you')
+    } else if (d.kind === 'resize-venue' && d.moved) {
+      s.logActivity('venue', `Resized the room to ${formatFeet(s.venueDimensions.widthFt)} × ${formatFeet(s.venueDimensions.lengthFt)}.`, 'you')
     }
+  }
+
+  const nudgeVenueSize = (e: React.KeyboardEvent, axis: 'x' | 'y' | 'both') => {
+    const step = e.shiftKey ? 5 : 1
+    let dw = 0
+    let dl = 0
+    if (e.key === 'ArrowLeft') dw = -step
+    else if (e.key === 'ArrowRight') dw = step
+    else if (e.key === 'ArrowUp') dl = -step
+    else if (e.key === 'ArrowDown') dl = step
+    else return
+    e.preventDefault()
+    const patch: Partial<VenueDimensions> = {}
+    if (axis !== 'y' && dw !== 0) patch.widthFt = s.venueDimensions.widthFt + dw
+    if (axis !== 'x' && dl !== 0) patch.lengthFt = s.venueDimensions.lengthFt + dl
+    if (Object.keys(patch).length === 0) return
+    s.updateVenueDimensions(patch)
+    s.logActivity('venue', `Resized the room to ${formatFeet(patch.widthFt ?? s.venueDimensions.widthFt)} × ${formatFeet(patch.lengthFt ?? s.venueDimensions.lengthFt)}.`, 'you')
   }
 
   const empty = s.guestOrder.length === 0 && s.tableOrder.length === 0
 
+  const onBackgroundTarget = (target: EventTarget) => target === wrapRef.current || target === stageRef.current
+
   return (
     <div
-      className="canvas-wrap"
+      className={`canvas-wrap${panning ? ' panning' : ''}`}
       ref={wrapRef}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerLeave={() => drag?.kind === 'chip' && setDrag(null)}
-      onWheel={(event) => {
-        if (!event.ctrlKey && !event.metaKey) return
-        event.preventDefault()
-        setZoom((value) => Math.max(0.6, Math.min(1.8, value + (event.deltaY < 0 ? 0.1 : -0.1))))
+      onPointerDown={(e) => {
+        if (dragRef.current) return
+        // Left-drag on the empty floor pans; middle-drag pans from anywhere.
+        if (e.button === 1 || (e.button === 0 && onBackgroundTarget(e.target))) {
+          e.preventDefault()
+          ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+          panDrag.current = { startX: e.clientX, startY: e.clientY, originX: view.x, originY: view.y, moved: false }
+          setPanning(true)
+        }
+      }}
+      onDoubleClick={(e) => {
+        if (onBackgroundTarget(e.target)) setViewState(null)
       }}
     >
+      {s.proposal && (
+        <div className="proposal-banner" role="status" aria-live="polite">
+          <span className="proposal-banner-text">
+            <span aria-hidden="true">❦</span> The agent proposes {s.proposal.summary} — {s.proposal.moved} move
+            {s.proposal.moved === 1 ? '' : 's'}
+          </span>
+          <button type="button" className="proposal-keep" onClick={() => s.resolveProposal('keep')}>
+            Keep
+          </button>
+          <button type="button" className="proposal-revert" onClick={() => s.resolveProposal('revert')}>
+            Revert
+          </button>
+        </div>
+      )}
       <div className="canvas-zoom-controls" role="group" aria-label="Floor plan zoom">
         <button
           type="button"
           aria-label="Zoom out"
-          disabled={zoom <= 0.6}
-          onClick={() => setZoom((value) => Math.max(0.6, value - 0.1))}
+          disabled={scale <= MIN_SCALE * 1.001}
+          onClick={() => zoomStep(1 / 1.25)}
         >
           −
         </button>
-        <button type="button" className="zoom-readout" aria-label={`Reset zoom. Current zoom ${Math.round(zoom * 100)} percent`} onClick={() => setZoom(1)}>
-          {Math.round(zoom * 100)}%
+        <button
+          type="button"
+          className="zoom-readout"
+          title="Zoom to fit the room"
+          aria-label={`Zoom to fit. Current zoom ${Math.round(scale * 100)} percent`}
+          onClick={() => setViewState(null)}
+        >
+          {Math.round(scale * 100)}%
         </button>
         <button
           type="button"
           aria-label="Zoom in"
-          disabled={zoom >= 1.8}
-          onClick={() => setZoom((value) => Math.min(1.8, value + 0.1))}
+          disabled={scale >= MAX_SCALE * 0.999}
+          onClick={() => zoomStep(1.25)}
         >
           +
         </button>
       </div>
       <div
         className="stage"
-        style={{ width: STAGE_W, height: STAGE_H, transform: `translate(${ox}px, ${oy}px) scale(${scale})` }}
-        onPointerDown={(e) => {
-          if (e.currentTarget === e.target) setLayoutSelection([])
-        }}
+        ref={stageRef}
+        style={{ width: stageDims.w, height: stageDims.h, transform: `translate(${ox}px, ${oy}px) scale(${scale})` }}
       >
         <div
-          className="room-frame"
+          className={`room-frame${drag?.kind === 'resize-venue' ? ' resizing' : ''}`}
           style={{
             left: room.x,
             top: room.y,
@@ -664,6 +832,41 @@ export function Canvas() {
         <div className="room-caption" style={{ left: room.x + room.w / 2, top: room.y - 6 }}>
           Main room · {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)}
         </div>
+        <button
+          type="button"
+          className="room-resize-handle edge-e"
+          style={{ left: room.x + room.w, top: room.y + room.h / 2, ['--handle-scale' as string]: 1 / scale }}
+          aria-label={`Resize the room's width. Drag, or use left and right arrows; currently ${formatFeet(s.venueDimensions.widthFt)} wide.`}
+          onPointerDown={(e) => beginDrag(e, 'resize-venue', 'venue', { x: 0, y: 0 }, 'x')}
+          onKeyDown={(e) => nudgeVenueSize(e, 'x')}
+        >
+          <span aria-hidden="true">↔</span>
+        </button>
+        <button
+          type="button"
+          className="room-resize-handle edge-s"
+          style={{ left: room.x + room.w / 2, top: room.y + room.h, ['--handle-scale' as string]: 1 / scale }}
+          aria-label={`Resize the room's length. Drag, or use up and down arrows; currently ${formatFeet(s.venueDimensions.lengthFt)} long.`}
+          onPointerDown={(e) => beginDrag(e, 'resize-venue', 'venue', { x: 0, y: 0 }, 'y')}
+          onKeyDown={(e) => nudgeVenueSize(e, 'y')}
+        >
+          <span aria-hidden="true">↕</span>
+        </button>
+        <button
+          type="button"
+          className="room-resize-handle corner"
+          style={{ left: room.x + room.w, top: room.y + room.h, ['--handle-scale' as string]: 1 / scale }}
+          aria-label={`Resize the room. Drag the corner, or use arrow keys; currently ${formatFeet(s.venueDimensions.widthFt)} by ${formatFeet(s.venueDimensions.lengthFt)}. Hold Shift for 5 foot steps.`}
+          onPointerDown={(e) => beginDrag(e, 'resize-venue', 'venue', { x: 0, y: 0 }, 'both')}
+          onKeyDown={(e) => nudgeVenueSize(e, 'both')}
+        >
+          <span aria-hidden="true">↘</span>
+        </button>
+        {drag?.kind === 'resize-venue' && (
+          <span className="room-size-readout" style={{ left: room.x + room.w - 14, top: room.y + room.h - 14, ['--handle-scale' as string]: 1 / scale }}>
+            {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)}
+          </span>
+        )}
         <div className="scale-bar" style={{ left: room.x + 18, top: room.y + room.h + 6, width: unitsPerFoot.x * 10 }}>
           <span>10′</span>
         </div>
@@ -682,6 +885,7 @@ export function Canvas() {
               feature={feature}
               dimensions={s.venueDimensions}
               selected={layoutSelection.some((entry) => layoutKey(entry.kind, entry.id) === layoutKey('feature', feature.id))}
+              highlighted={s.ruleHighlight?.zone === feature.id}
               overlaps={collisions.get(layoutKey('feature', feature.id)) ?? []}
               active={
                 (drag?.kind === 'feature' || drag?.kind === 'resize-feature' || drag?.kind === 'rotate-feature') && drag.id === feature.id
@@ -735,7 +939,7 @@ export function Canvas() {
         )}
 
         {/* violation lines under chips */}
-        <svg className="viol-lines" width={STAGE_W} height={STAGE_H}>
+        <svg className="viol-lines" width={stageDims.w} height={stageDims.h}>
           {violations.map((v, i) => {
             if (v.kind !== 'together' && v.kind !== 'apart') return null
             const pa = s.seating[v.a] && positions[v.a]
@@ -834,6 +1038,7 @@ export function Canvas() {
               dragging={false}
               selected={s.selection?.kind === 'guest' && s.selection.id === id}
               violated={violatedGuests.has(id)}
+              highlighted={s.ruleHighlight?.guestIds.includes(id)}
               touchedAt={touchedAt}
               staggerMs={escortDelay ?? (recentTouch ? (hashId(id) % 12) * 30 : 0)}
               whereLabel={`at ${s.tables[s.seating[id].tableId]?.name}`}
@@ -854,6 +1059,7 @@ export function Canvas() {
 
         {violations.length > 0 && !s.finalized && (
           <button
+            data-tour="violation-banner"
             className="viol-banner"
             onClick={() => seatEveryone('repair')}
             title="Runs the solver in repair mode — fixes every broken rule while moving as few guests as possible"
@@ -899,6 +1105,7 @@ export function Canvas() {
           (drag the top edge) and collapsible (the chevron), independent of
           zoom entirely. */}
       <div
+        data-tour="lounge"
         ref={loungeRef}
         className={[
           'lounge',
@@ -949,6 +1156,7 @@ export function Canvas() {
                     dragging={false}
                     selected={s.selection?.kind === 'guest' && s.selection.id === id}
                     violated={violatedGuests.has(id)}
+                    highlighted={s.ruleHighlight?.guestIds.includes(id)}
                     touchedAt={touchedAt}
                     staggerMs={escortDelay ?? (recentTouch ? (hashId(id) % 12) * 30 : 0)}
                     whereLabel="in the lounge"
@@ -998,6 +1206,8 @@ function VenueFeatureView(props: {
   feature: VenueFeature
   dimensions: VenueDimensions
   selected: boolean
+  /** Spotlit because the user is hovering a zone rule about this feature. */
+  highlighted?: boolean
   overlaps: string[]
   active: 'feature' | 'resize-feature' | 'rotate-feature' | null
   onPointerDown: (e: React.PointerEvent) => void
@@ -1015,7 +1225,7 @@ function VenueFeatureView(props: {
   const densityClass = `${compact ? ' compact' : ''}${micro ? ' micro' : ''}${horizontal ? ' horizontal-content' : ''}`
   return (
     <div
-      className={`venue-feature venue-feature-${feature.id}${densityClass}${props.selected ? ' selected' : ''}${props.overlaps.length ? ' overlapping' : ''}${active ? ` ${active === 'feature' ? 'dragging' : active === 'rotate-feature' ? 'rotating' : 'resizing'}` : ''}`}
+      className={`venue-feature venue-feature-${feature.id}${densityClass}${props.selected ? ' selected' : ''}${props.highlighted ? ' rule-glow' : ''}${props.overlaps.length ? ' overlapping' : ''}${active ? ` ${active === 'feature' ? 'dragging' : active === 'rotate-feature' ? 'rotating' : 'resizing'}` : ''}`}
       style={{ left: feature.x, top: feature.y, width: feature.w, height: feature.h, transform: `rotate(${feature.rotation ?? 0}deg)` }}
       role="group"
       aria-label={`${feature.label}, ${formatFeet(measured.w)} by ${formatFeet(measured.h)}${props.overlaps.length ? `, overlaps ${props.overlaps.join(', ')}` : ''}`}

@@ -34,6 +34,28 @@ export type VenueFeatureId =
   | 'cake_table'
   | 'gift_table'
 
+export type VenuePreset = 'ballroom' | 'garden_tent' | 'restaurant' | 'custom'
+
+export type DemoTableStyle = 'round' | 'banquet' | 'mixed'
+
+export type DemoPriority = 'family_harmony' | 'dance_floor_energy' | 'easy_arrivals'
+
+export interface PersonalizedDemoConfig {
+  venuePreset: VenuePreset
+  widthFt: number
+  lengthFt: number
+  tableStyle: DemoTableStyle
+  seatsPerTable: 6 | 8 | 10
+  amenities: VenueFeatureId[]
+  priority: DemoPriority
+}
+
+export interface PersonalizedDemoMetadata {
+  kind: 'personalized'
+  version: 1
+  config: PersonalizedDemoConfig
+}
+
 export interface VenueFeature {
   id: VenueFeatureId
   label: string
@@ -117,4 +139,6 @@ export interface AisleState {
   venue: Record<VenueFeatureId, VenueFeature>
   /** Real-world dimensions represented by the planning floor. */
   venueDimensions: VenueDimensions
+  /** Present only while the chart is still the structurally intact personalized demo. */
+  demoMetadata: PersonalizedDemoMetadata | null
 }
