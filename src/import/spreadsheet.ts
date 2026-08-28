@@ -1,5 +1,5 @@
 import type { RSVP } from '../types'
-import type { ImportEntry } from '../utils'
+import { parseGuestEntries, type ImportEntry } from '../utils'
 import { ZipError, openZip } from './zip'
 
 /** What the file picker offers and what readSpreadsheet knows how to open. */
@@ -226,6 +226,34 @@ export function guestEntriesFromRows(rows: string[][], defaultGroup?: string): S
     })
   }
   return { entries, columns, usedHeader }
+}
+
+/**
+ * Reads a guest list out of pasted text, picking the shape it is actually in:
+ * rows copied straight out of a spreadsheet (with or without a header row),
+ * or the one-per-line "Name — Group — dietary" form the paste box has always
+ * taken. Columns are only trusted when the text really reads as a table —
+ * a lone comma in "Flynn, Nora" is a name, not a column break.
+ */
+export function guestEntriesFromText(text: string, defaultGroup?: string): ImportEntry[] {
+  const trimmed = text.trim()
+  if (!trimmed || trimmed.startsWith('[')) return parseGuestEntries(trimmed, defaultGroup)
+  const delimiter = detectDelimiter(trimmed)
+  const rows = parseDelimited(trimmed, delimiter).filter((row) => row.some((cell) => cell))
+  const widths = rows.map((row) => row.length)
+  const columnar =
+    rows.length > 0 &&
+    widths.filter((width) => width >= 2).length >= Math.max(1, rows.length - 1) &&
+    // Tabs and semicolons only ever separate columns; commas need more
+    // evidence — a header we recognise, or a third column.
+    (delimiter !== ',' || widths.filter((width) => width >= 3).length >= Math.max(1, rows.length - 1))
+  if (columnar) {
+    const sheet = guestEntriesFromRows(rows, defaultGroup)
+    if (sheet.entries.length > 0) return sheet.entries
+  }
+  const headed = guestEntriesFromRows(rows, defaultGroup)
+  if (headed.usedHeader && headed.entries.length > 0) return headed.entries
+  return parseGuestEntries(trimmed, defaultGroup)
 }
 
 /**

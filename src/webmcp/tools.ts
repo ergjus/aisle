@@ -4,7 +4,8 @@ import { ROOM, WALL_MARGIN, containDelta, featureMinSize, feetSize, formatFeet, 
 import { computeViolations, constraintStatus, constraintText, dramaLabel, dramaScore, findDuplicateRule } from '../constraints'
 import { autoArrange } from '../solver'
 import { SAMPLE } from '../sample'
-import { chartMarkdown, parseGuestEntries } from '../utils'
+import { chartMarkdown } from '../utils'
+import { guestEntriesFromText } from '../import/spreadsheet'
 import { buildDocModel, chartCSV, type ExportSections, type PaperSize } from '../export/model'
 import { loadExportOptions, saveExportOptions } from '../export/options'
 import { syncTools, webmcpAvailable, type WebTool } from './adapter'
@@ -102,7 +103,7 @@ function layoutWarning(state: AisleState, ids: string[]): string {
       .map((item) => `${item.label} reaches ${formatFeet(item.overhangFt)} past the wall`),
   ]
   if (warnings.length === 0) return ''
-  return ` ⚠ ${warnings.join(', ')} — move, shrink, or rotate to clear it, or enlarge the room with set_venue_dimensions.`
+  return ` ⚠ ${warnings.join(', ')} — move, shrink, or rotate to clear it, or enlarge the room with update_venue_dimensions.`
 }
 
 // ---- fuzzy lookup ----------------------------------------------------------
@@ -666,7 +667,7 @@ function baseTools(): WebTool[] {
     ),
     makeTool(
       'import_guests',
-      'Bulk-import guests from pasted text — one guest per line, fields separated by " — ", " | " or tabs: name, then optionally group, dietary needs, and RSVP (yes/no/pending). Example: "Nora Flynn — Childhood friends — vegetarian". A JSON array of {name, group, dietary, rsvp, notes} objects also works. Duplicate names are skipped.',
+      'Bulk-import guests from pasted text. Rows copied out of a spreadsheet work as-is — CSV, TSV, or semicolon-separated, with or without a header row; a header (Name / Group or Side / RSVP / Dietary / Notes, in any order, and First + Last name as separate columns) is read and its columns mapped. So does one guest per line with fields separated by " — ", " | " or tabs: name, then group, dietary needs, RSVP (yes/no/pending) — e.g. "Nora Flynn — Childhood friends — vegetarian". A JSON array of {name, group, dietary, rsvp, notes} objects also works. Duplicate names are skipped. (To load an .xlsx file, ask the human to use "Import a Spreadsheet…" under Guests, or paste its rows here.)',
       obj(
         {
           text: str('The pasted guest list'),
@@ -675,7 +676,7 @@ function baseTools(): WebTool[] {
         ['text'],
       ),
       (args) => {
-        const entries = parseGuestEntries(String(args.text ?? ''), args.default_group ? String(args.default_group) : undefined)
+        const entries = guestEntriesFromText(String(args.text ?? ''), args.default_group ? String(args.default_group) : undefined)
         if (entries.length === 0) return fail('Could not find any guest names in that text.')
         const added = useStore.getState().importGuests(entries)
         const skipped = entries.length - added.length
@@ -688,23 +689,31 @@ function baseTools(): WebTool[] {
     ),
     makeTool(
       'add_table',
-      'Add a table to the room. Choose a name, seat count (2–16), shape (round or rect), and optionally where its center goes in real-world feet from the room’s top-left, plus a rotation. Without a position it lands in an open spot; the human can drag or rotate it afterwards. The reply warns if the placement overlaps other furniture.',
+      'Add one or more tables to the room. Choose a seat count (2–16), shape (round or rect), and optionally count to add a whole row at once — "ten rounds of eight" is one call, and one thing for the human to undo. A single table can be given a name and a position in real-world feet from the room’s top-left, plus a rotation; extras are auto-numbered and each lands in its own open spot. The reply warns if a placement overlaps other furniture.',
       obj({
-        name: str('Table name, e.g. "Table 11" or "Head table"; auto-numbered if omitted'),
-        seats: { type: 'integer', minimum: 2, maximum: 16, description: 'Number of seats (default 8)' },
+        name: str('Name for the table, e.g. "Head table"; auto-numbered if omitted, and ignored when count is above 1'),
+        seats: { type: 'integer', minimum: 2, maximum: 16, description: 'Seats per table (default 8)' },
         shape: str('Table shape', { enum: ['round', 'rect'] }),
-        x_ft: { type: 'number', minimum: 0, maximum: 300, description: 'Table center in feet from the room’s left wall' },
-        y_ft: { type: 'number', minimum: 0, maximum: 200, description: 'Table center in feet from the room’s top wall' },
+        count: { type: 'integer', minimum: 1, maximum: 40, description: 'How many identical tables to add (default 1)' },
+        x_ft: { type: 'number', minimum: 0, maximum: 300, description: 'Table center in feet from the room’s left wall; single table only' },
+        y_ft: { type: 'number', minimum: 0, maximum: 200, description: 'Table center in feet from the room’s top wall; single table only' },
         rotation: { type: 'number', minimum: -360, maximum: 360, description: 'Clockwise rotation in degrees' },
       }),
       (args) => {
-        const fields: Partial<Omit<Table, 'id'>> = {
-          name: args.name ? String(args.name) : undefined,
-          seats: typeof args.seats === 'number' ? args.seats : undefined,
-          shape: args.shape === 'rect' ? 'rect' : 'round',
+        const count = Math.max(1, Math.min(40, typeof args.count === 'number' ? Math.round(args.count) : 1))
+        const shape: Table['shape'] = args.shape === 'rect' ? 'rect' : 'round'
+        const seats = typeof args.seats === 'number' ? args.seats : undefined
+        const rotation = typeof args.rotation === 'number' ? ((args.rotation % 360) + 360) % 360 : undefined
+        const wantsPosition = typeof args.x_ft === 'number' || typeof args.y_ft === 'number'
+        if (wantsPosition && count > 1) {
+          return fail('x_ft / y_ft place a single table. Add the row without them and each table finds its own open spot, or place them one call at a time.')
         }
-        if (typeof args.rotation === 'number') fields.rotation = ((args.rotation % 360) + 360) % 360
-        if (typeof args.x_ft === 'number' || typeof args.y_ft === 'number') {
+
+        const base: Partial<Omit<Table, 'id'>> = { shape }
+        if (seats !== undefined) base.seats = seats
+        if (rotation !== undefined) base.rotation = rotation
+        if (count === 1 && args.name) base.name = String(args.name)
+        if (wantsPosition) {
           const dimensions = getCore().venueDimensions
           const units = stageUnitsPerFoot(dimensions)
           const room = roomRect(dimensions)
@@ -713,25 +722,80 @@ function baseTools(): WebTool[] {
           const probe: Table = {
             id: 'probe',
             name: '',
-            shape: fields.shape ?? 'round',
-            seats: Math.max(2, Math.min(16, fields.seats ?? 8)),
-            rotation: fields.rotation ?? 0,
+            shape,
+            seats: Math.max(2, Math.min(16, seats ?? 8)),
+            rotation: rotation ?? 0,
             x,
             y,
           }
           const { dx, dy } = containDelta(tableBounds(probe, dimensions), room)
-          fields.x = x + dx
-          fields.y = y + dy
+          base.x = x + dx
+          base.y = y + dy
         }
-        const table = useStore.getState().addTable(fields)
+
+        // One snapshot for the whole row, so the human undoes "add ten tables"
+        // in a single step rather than ten.
+        const store = useStore.getState()
+        if (count > 1) store.snapshot('add tables')
+        const added: Table[] = []
+        for (let i = 0; i < count; i++) {
+          added.push(store.addTable(base, { snapshot: count === 1 }))
+        }
+
         const dimensions = getCore().venueDimensions
         const units = stageUnitsPerFoot(dimensions)
         const room = roomRect(dimensions)
+        const shapeWord = shape === 'round' ? 'round' : 'banquet'
+        const warning = layoutWarning(getCore(), added.map((t) => t.id))
+        if (added.length === 1) {
+          const table = added[0]
+          return ok(
+            `Added ${table.name} (${shapeWord}, ${table.seats} seats), centered at (${formatFeet((table.x - room.x) / units.x)}, ${formatFeet((table.y - room.y) / units.y)})${table.rotation ? `, rotated ${Math.round(table.rotation)}°` : ''}.${warning}`,
+            [table.id],
+            `Added ${table.name} — ${shapeWord}, ${table.seats} seats.`,
+          )
+        }
+        const capacity = added.reduce((sum, table) => sum + table.seats, 0)
         return ok(
-          `Added ${table.name} (${table.shape}, ${table.seats} seats), centered at (${formatFeet((table.x - room.x) / units.x)}, ${formatFeet((table.y - room.y) / units.y)})${table.rotation ? `, rotated ${Math.round(table.rotation)}°` : ''}.${layoutWarning(getCore(), [table.id])}`,
-          [table.id],
-          `Added ${table.name} — ${table.shape === 'round' ? 'round' : 'rectangular'}, ${table.seats} seats.`,
+          `Added ${added.length} ${shapeWord} tables of ${added[0].seats} — ${added.map((t) => t.name).join(', ')} — ${capacity} more seats.${warning}`,
+          added.map((t) => t.id),
+          `Added ${added.length} ${shapeWord} tables (${capacity} seats).`,
         )
+      },
+    ),
+    makeTool(
+      'add_group',
+      'Create a guest group (a party or side, e.g. "Sailing club") before anyone is in it — useful when you are about to import or add several guests and want the group to exist first. Adding a guest with a new group name creates it too, so only reach for this when you want the empty group itself. Returns the existing name if one already matches, case-insensitively.',
+      obj({ name: str('Group name') }, ['name']),
+      (args) => {
+        const name = String(args.name ?? '').trim()
+        if (!name) return fail('A group needs a name.')
+        const before = getCore().groupOrder
+        const added = useStore.getState().addGroup(name)
+        if (!added) return fail('A group needs a name.')
+        if (before.includes(added)) return ok(`"${added}" is already a group — nothing to do.`)
+        return ok(`Added the group "${added}". It has no guests yet.`, undefined, `Added the group "${added}".`)
+      },
+    ),
+    makeTool(
+      'remove_group',
+      'Remove an empty group from the guest list. Groups with guests in them are kept — move or remove those guests first (update_guest changes someone’s group).',
+      obj({ name: str('Group name to remove') }, ['name']),
+      (args) => {
+        const state = getCore()
+        const name = String(args.name ?? '').trim()
+        const match = state.groupOrder.find((group) => group.toLowerCase() === name.toLowerCase())
+        if (!match) {
+          return fail(`No group called "${name}". Groups: ${state.groupOrder.join(', ') || 'none yet'}.`)
+        }
+        const members = state.guestOrder.filter((id) => state.guests[id].group === match)
+        if (members.length > 0) {
+          return fail(
+            `"${match}" still has ${members.length} guest${members.length === 1 ? '' : 's'} in it: ${members.slice(0, 6).map((id) => state.guests[id].name).join(', ')}${members.length > 6 ? '…' : ''}. Move or remove them first.`,
+          )
+        }
+        useStore.getState().removeGroup(match)
+        return ok(`Removed the empty group "${match}".`, undefined, `Removed the empty group "${match}".`)
       },
     ),
     makeTool(
@@ -835,6 +899,69 @@ function baseTools(): WebTool[] {
         )
       },
       { readOnly: true },
+    ),
+    makeTool(
+      'undo',
+      'Step the whole chart back one change — the same Undo the human has in the header (⌘Z), and it undoes their edits as well as yours. Use it to take back something you just did that the human did not like; the reply names the change that was undone. For a bigger jump back, save_checkpoint / restore_checkpoint are the better tools. Note: undoing while one of your proposals is on screen counts as rejecting it.',
+      obj({
+        steps: { type: 'integer', minimum: 1, maximum: 20, description: 'How many changes to step back (default 1)' },
+      }),
+      (args) => {
+        const store = useStore.getState()
+        const steps = Math.max(1, Math.min(20, typeof args.steps === 'number' ? Math.round(args.steps) : 1))
+        const labels: string[] = []
+        for (let i = 0; i < steps; i++) {
+          const next = useStore.getState().undoStack[useStore.getState().undoStack.length - 1]
+          if (!next || !store.undo()) break
+          labels.push(next.label)
+        }
+        if (labels.length === 0) return fail('Nothing left to undo.')
+        return ok(
+          `Undid ${labels.length === 1 ? `“${labels[0]}”` : `${labels.length} changes: ${labels.map((l) => `“${l}”`).join(', ')}`}. ${roomSummary(getCore()).split('\n')[0]}`,
+          undefined,
+          `Undid ${labels.length === 1 ? labels[0] : `${labels.length} changes`}.`,
+        )
+      },
+    ),
+    makeTool(
+      'redo',
+      'Put back a change that undo took away — the same Redo the human has in the header. Only available until the next edit, which clears the redo history.',
+      obj({
+        steps: { type: 'integer', minimum: 1, maximum: 20, description: 'How many changes to step forward (default 1)' },
+      }),
+      (args) => {
+        const store = useStore.getState()
+        const steps = Math.max(1, Math.min(20, typeof args.steps === 'number' ? Math.round(args.steps) : 1))
+        let done = 0
+        for (let i = 0; i < steps; i++) {
+          if (!store.redo()) break
+          done++
+        }
+        if (done === 0) return fail('Nothing to redo — the redo history is empty, or an edit has cleared it.')
+        return ok(`Redid ${done} change${done === 1 ? '' : 's'}.`, undefined, `Redid ${done} change${done === 1 ? '' : 's'}.`)
+      },
+    ),
+    makeTool(
+      'reset_chart',
+      'Clear the whole chart back to an empty room — every guest, table, and rule, exactly as the human’s Reset button does. This throws away their work, so only call it when the human has asked for it in as many words, and pass confirm true to say that they did. It is a single undo away, and save_checkpoint first if you want a way back.',
+      obj({
+        confirm: { type: 'boolean', description: 'Must be true. Set it only when the human has explicitly asked to clear the chart.' },
+      }),
+      (args) => {
+        if (args.confirm !== true) {
+          return fail('reset_chart clears every guest, table, and rule. Ask the human first, then call it again with confirm true.')
+        }
+        const before = getCore()
+        if (before.guestOrder.length === 0 && before.tableOrder.length === 0) {
+          return fail('The chart is already empty.')
+        }
+        useStore.getState().resetAll()
+        return ok(
+          `Cleared the chart: ${before.guestOrder.length} guest${before.guestOrder.length === 1 ? '' : 's'}, ${before.tableOrder.length} table${before.tableOrder.length === 1 ? '' : 's'}, and ${before.constraints.length} rule${before.constraints.length === 1 ? '' : 's'} removed. One undo brings it all back.`,
+          undefined,
+          'Cleared the chart back to an empty room.',
+        )
+      },
     ),
     makeTool(
       'save_checkpoint',

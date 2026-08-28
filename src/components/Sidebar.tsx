@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ChevronRight, Plus } from 'lucide-react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { ChevronRight, History, MapPin, Plus, ShieldCheck, Table2, Users, type LucideIcon } from 'lucide-react'
 import { useStore } from '../store'
 import { groupColors, parseGuestEntries } from '../utils'
 import { SPREADSHEET_ACCEPT, SpreadsheetError, readSpreadsheet } from '../import/spreadsheet'
@@ -50,125 +50,103 @@ function usePersistedOpen(key: string, fallback: boolean) {
   return [open, set] as const
 }
 
-/** Persists a small JSON blob to localStorage, merged over `fallback` so new keys added later still get a default. */
-function usePersistedJSON<T extends Record<string, unknown>>(key: string, fallback: T) {
-  const [value, setValue] = useState<T>(() => {
+type SectionId = 'venue' | 'tables' | 'guests' | 'activity' | 'rules'
+
+type SectionDefinition = {
+  id: SectionId
+  title: string
+  icon: LucideIcon
+}
+
+const SECTIONS: SectionDefinition[] = [
+  { id: 'venue', title: 'Venue', icon: MapPin },
+  { id: 'tables', title: 'Tables', icon: Table2 },
+  { id: 'guests', title: 'Guests', icon: Users },
+  { id: 'rules', title: 'House rules', icon: ShieldCheck },
+  { id: 'activity', title: 'Activity', icon: History },
+]
+
+const PRIMARY_SECTIONS = SECTIONS.filter((section) => section.id !== 'activity')
+const ACTIVITY_SECTION = SECTIONS.find((section) => section.id === 'activity')!
+
+function usePersistedSection(key: string, fallback: SectionId) {
+  const [section, setSection] = useState<SectionId>(() => {
     try {
-      const raw = localStorage.getItem(key)
-      return raw ? { ...fallback, ...JSON.parse(raw) } : fallback
+      const raw = localStorage.getItem(key) as SectionId | null
+      return SECTIONS.some(({ id }) => id === raw) ? raw! : fallback
     } catch {
       return fallback
     }
   })
-  const set = (v: T) => {
-    setValue(v)
+  const set = (next: SectionId) => {
+    setSection(next)
     try {
-      localStorage.setItem(key, JSON.stringify(v))
+      localStorage.setItem(key, next)
     } catch {
       // Preference simply won't stick.
     }
   }
-  return [value, set] as const
+  return [section, set] as const
 }
 
-type SectionId = 'venue' | 'tables' | 'guests' | 'activity' | 'rules'
-
-/** Starting share of the sidebar's leftover height for each section, and the floor it can't be dragged below. */
-const DEFAULT_WEIGHTS: Record<SectionId, number> = { venue: 210, tables: 230, guests: 300, activity: 180, rules: 180 }
-const MIN_HEIGHTS: Record<SectionId, number> = { venue: 180, tables: 170, guests: 160, activity: 110, rules: 110 }
-
-function Section(props: {
-  id: SectionId
+/** Keeps each section quiet until the user chooses to add something, then
+ * reveals the existing inline composer without taking them out of context. */
+function InlineAddPanel(props: {
+  buttonLabel: string
   title: string
-  count?: ReactNode
-  /** Shown in the header row only while the section is collapsed. */
-  closedExtra?: ReactNode
-  /** Shown at the end of the header row only while the section is open — a real button, sitting outside the collapse trigger. */
-  headerAction?: ReactNode
   open: boolean
-  onOpenChange: (v: boolean) => void
-  /** Height this section never shrinks below, so it can't be squeezed away. */
-  minHeight: number
-  /** Its share of the leftover height, relative to the other open sections — drag the handle below a section to change it. */
-  weight: number
+  onOpenChange: (open: boolean) => void
   children: ReactNode
 }) {
-  const { open } = props
-  return (
-    <Collapsible
-      data-tour={props.id}
-      open={open}
-      onOpenChange={props.onOpenChange}
-      className={cn(
-        'flex flex-col',
-        // Open sections split the leftover height by weight (basis-0) and never
-        // fall below minHeight, so each one scrolls inside itself instead of
-        // pushing the sections below it off the bottom. No max-content cap: the
-        // whole point of the drag handle is letting the weight win even when a
-        // section's own content is short. Collapsed ones stay put.
-        open ? 'min-h-0 basis-0 shrink' : 'flex-none',
-      )}
-      style={open ? { minHeight: props.minHeight, flexGrow: props.weight } : undefined}
-    >
-      <div className="flex w-full shrink-0 items-center gap-1">
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-2 text-left text-[11.5px] font-bold tracking-[0.12em] text-ink-soft uppercase hover:bg-accent">
-          <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden="true" />
-          {props.title}
-          {props.count !== undefined && (
-            <span className="text-[11px] tracking-wide text-ink-faint">{props.count}</span>
-          )}
-          {!open && props.closedExtra}
-        </CollapsibleTrigger>
-        {open && props.headerAction}
-      </div>
-      <CollapsibleContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-2 data-open:block">
-        {props.children}
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
+  const panelId = useId()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const wasOpen = useRef(false)
 
-/** Drag handle between two sections — only live when both are open, since a collapsed section has nothing to give up. */
-function ResizeHandle(props: {
-  above: SectionId
-  below: SectionId
-  active: boolean
-  weights: Record<SectionId, number>
-  setWeights: (w: Record<SectionId, number>) => void
-}) {
-  const { above, below, active, weights, setWeights } = props
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (!active) return
-    e.preventDefault()
-    const startY = e.clientY
-    const startAbove = weights[above]
-    const startBelow = weights[below]
-    const onMove = (ev: PointerEvent) => {
-      const dy = ev.clientY - startY
-      setWeights({
-        ...weights,
-        [above]: Math.max(30, startAbove + dy),
-        [below]: Math.max(30, startBelow - dy),
-      })
+  useEffect(() => {
+    if (props.open) {
+      const panel = panelRef.current
+      const target = panel?.querySelector<HTMLElement>('[data-add-autofocus]')
+        ?? panel?.querySelector<HTMLElement>('input:not([type="hidden"]), button:not([disabled])')
+      target?.focus()
+    } else if (wasOpen.current) {
+      triggerRef.current?.focus()
     }
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    wasOpen.current = props.open
+  }, [props.open])
+
+  if (!props.open) {
+    return (
+      <Button
+        ref={triggerRef}
+        variant="outline"
+        size="sm"
+        className="w-full"
+        aria-expanded={false}
+        aria-controls={panelId}
+        onClick={() => props.onOpenChange(true)}
+      >
+        <Plus data-icon="inline-start" aria-hidden="true" />
+        {props.buttonLabel}
+      </Button>
+    )
   }
+
   return (
     <div
-      className={cn('group relative z-10 -my-1.5 h-3 shrink-0 touch-none', active ? 'cursor-row-resize' : 'cursor-default')}
-      onPointerDown={onPointerDown}
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label={`Resize ${above} / ${below}`}
+      ref={panelRef}
+      id={panelId}
+      className="flex flex-col gap-1.5 rounded-lg border bg-parchment/70 p-2"
     >
-      {active && (
-        <div className="absolute inset-x-2 top-1/2 h-px -translate-y-1/2 rounded-full bg-hairline transition-colors group-hover:bg-gold" />
-      )}
+      <div className="flex items-center justify-between gap-2">
+        <span className="pl-0.5 text-[10.5px] font-bold tracking-[0.1em] text-ink-soft uppercase">
+          {props.title}
+        </span>
+        <Button variant="ghost" size="xs" onClick={() => props.onOpenChange(false)}>
+          Done
+        </Button>
+      </div>
+      {props.children}
     </div>
   )
 }
@@ -225,48 +203,93 @@ function DimensionInput(props: { label: string; value: number; min: number; max:
 
 function VenueSection() {
   const s = useStore()
+  const [addingFeature, setAddingFeature] = useState(false)
+  const [roomSettingsOpen, setRoomSettingsOpen] = useState(false)
+  const enabledFeatures = VENUE_FEATURES.filter(({ id }) => s.venue[id].enabled)
+  const availableFeatures = VENUE_FEATURES.filter(({ id }) => !s.venue[id].enabled)
 
   return (
-    <div className="space-y-2 pt-1">
-      <div className="rounded-lg border border-hairline bg-parchment/45 p-2">
-        <div className="mb-2 flex items-baseline justify-between gap-2">
-          <span className="text-[10px] font-bold tracking-[0.13em] text-ink-soft uppercase">Room size</span>
-          <span className="text-[10px] text-ink-faint">
-            {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)}
+    <div className="flex flex-col gap-2 pt-1">
+      <Collapsible open={roomSettingsOpen} onOpenChange={setRoomSettingsOpen}>
+        <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-lg border border-hairline bg-parchment/45 px-2.5 py-2 text-left hover:bg-accent">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[10.5px] font-bold tracking-[0.11em] text-ink-soft uppercase">Room settings</span>
+            <span className="block truncate text-[10.5px] text-ink-faint">
+              {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)} · {s.venueDimensions.snapFt === 0 ? 'grid off' : `${formatFeet(s.venueDimensions.snapFt)} grid`}
+            </span>
           </span>
-        </div>
-        <div className="grid grid-cols-2 gap-1.5">
-          <DimensionInput label="Width (ft)" value={s.venueDimensions.widthFt} min={20} max={300} onCommit={(value) => s.updateVenueDimensions({ widthFt: value })} />
-          <DimensionInput label="Length (ft)" value={s.venueDimensions.lengthFt} min={15} max={200} onCommit={(value) => s.updateVenueDimensions({ lengthFt: value })} />
-        </div>
-        <div className="mt-1.5 flex items-center justify-between gap-2">
-          <label className="text-[9.5px] font-semibold tracking-wide text-ink-soft uppercase" htmlFor="venue-snap">
-            Snap grid
-          </label>
-          <Select
-            value={String(s.venueDimensions.snapFt)}
-            onValueChange={(value) => s.updateVenueDimensions({ snapFt: Number(value) })}
-          >
-            <SelectTrigger id="venue-snap" className="h-7 w-[92px] bg-ivory px-2 text-[10.5px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="0">Off</SelectItem>
-              <SelectItem value="0.5">6 inches</SelectItem>
-              <SelectItem value="1">1 foot</SelectItem>
-              <SelectItem value="2">2 feet</SelectItem>
-              <SelectItem value="5">5 feet</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+          <ChevronRight
+            className={cn('size-3.5 shrink-0 text-ink-faint transition-transform', roomSettingsOpen && 'rotate-90')}
+            aria-hidden="true"
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-1.5">
+          <div className="rounded-lg border border-hairline bg-parchment/45 p-2">
+            <div className="grid grid-cols-2 gap-1.5">
+              <DimensionInput label="Width (ft)" value={s.venueDimensions.widthFt} min={20} max={300} onCommit={(value) => s.updateVenueDimensions({ widthFt: value })} />
+              <DimensionInput label="Length (ft)" value={s.venueDimensions.lengthFt} min={15} max={200} onCommit={(value) => s.updateVenueDimensions({ lengthFt: value })} />
+            </div>
+            <div className="mt-1.5 flex items-center justify-between gap-2">
+              <label className="text-[9.5px] font-semibold tracking-wide text-ink-soft uppercase" htmlFor="venue-snap">
+                Snap grid
+              </label>
+              <Select
+                value={String(s.venueDimensions.snapFt)}
+                onValueChange={(value) => s.updateVenueDimensions({ snapFt: Number(value) })}
+              >
+                <SelectTrigger id="venue-snap" className="h-7 w-[92px] bg-ivory px-2 text-[10.5px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Off</SelectItem>
+                  <SelectItem value="0.5">6 inches</SelectItem>
+                  <SelectItem value="1">1 foot</SelectItem>
+                  <SelectItem value="2">2 feet</SelectItem>
+                  <SelectItem value="5">5 feet</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="mt-2 text-[10.5px] leading-snug text-ink-soft">
+              Furniture stays put when the room grows. Drag the walls on the floor plan to resize directly.
+            </p>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
-      <p className="px-1 text-[10.5px] leading-snug text-ink-soft">
-        Resizing the room adds floor space — furniture stays put. Drag the room's walls to resize it · drag the empty floor to pan · pinch or ⌘-scroll to zoom · Alt moves freely · Shift-click selects a group.
-      </p>
+      {availableFeatures.length > 0 && (
+        <InlineAddPanel
+          buttonLabel="Add venue item"
+          title="Add venue items"
+          open={addingFeature}
+          onOpenChange={setAddingFeature}
+        >
+          <div className="grid grid-cols-2 gap-1">
+            {availableFeatures.map(({ id, glyph }) => {
+              const feature = s.venue[id]
+              return (
+                <Button
+                  key={id}
+                  variant="ghost"
+                  size="sm"
+                  className="justify-start"
+                  data-add-autofocus={id === availableFeatures[0]?.id ? '' : undefined}
+                  onClick={() => {
+                    s.updateVenueFeature(id, { enabled: true })
+                    s.logActivity('venue', `Added ${feature.label}.`, 'you')
+                    setAddingFeature(false)
+                  }}
+                >
+                  <span className="font-bold text-gold-ink" aria-hidden="true">{glyph}</span>
+                  {feature.label}
+                </Button>
+              )
+            })}
+          </div>
+        </InlineAddPanel>
+      )}
 
       <div className="grid grid-cols-1 gap-1">
-        {VENUE_FEATURES.map(({ id, glyph }) => {
+        {enabledFeatures.map(({ id, glyph }) => {
           const feature = s.venue[id]
           const dimensions = feetSize(feature.w, feature.h, s.venueDimensions)
           return (
@@ -279,23 +302,20 @@ function VenueSection() {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[11.5px] font-semibold">{feature.label}</span>
-                {feature.enabled && (
-                  <span className="block truncate text-[9.5px] text-ink-faint">
-                    {formatFeet(dimensions.w)} × {formatFeet(dimensions.h)} · {Math.round(feature.rotation)}°
-                  </span>
-                )}
+                <span className="block truncate text-[9.5px] text-ink-faint">
+                  {formatFeet(dimensions.w)} × {formatFeet(dimensions.h)} · {Math.round(feature.rotation)}°
+                </span>
               </span>
               <Button
-                variant={feature.enabled ? 'outline' : 'ghost'}
+                variant="ghost"
                 size="xs"
-                aria-pressed={feature.enabled}
-                aria-label={`${feature.enabled ? 'Hide' : 'Show'} ${feature.label}`}
+                aria-label={`Hide ${feature.label}`}
                 onClick={() => {
-                  s.updateVenueFeature(id, { enabled: !feature.enabled })
-                  s.logActivity('venue', `${feature.enabled ? 'Hid' : 'Added'} ${feature.label}.`, 'you')
+                  s.updateVenueFeature(id, { enabled: false })
+                  s.logActivity('venue', `Hid ${feature.label}.`, 'you')
                 }}
               >
-                {feature.enabled ? 'Shown' : 'Add'}
+                Hide
               </Button>
             </div>
           )
@@ -319,6 +339,7 @@ const TABLE_SHAPE_ITEMS = [
  */
 function TablesSection() {
   const s = useStore()
+  const [addingTable, setAddingTable] = useState(false)
   const [shape, setShape] = useState<TableShape>('round')
   const [seats, setSeats] = useState(8)
 
@@ -349,7 +370,12 @@ function TablesSection() {
   return (
     <>
       <div className="sticky top-0 z-10 -mx-1 mb-1 bg-ivory px-1 pt-1 pb-2">
-        <div className="flex flex-col gap-1.5 rounded-lg border bg-parchment/70 p-2">
+        <InlineAddPanel
+          buttonLabel="Add table"
+          title="New table"
+          open={addingTable}
+          onOpenChange={setAddingTable}
+        >
           <div className="flex items-center gap-1.5">
             <span className="shrink-0 pl-0.5 text-[10.5px] font-bold tracking-[0.1em] text-ink-soft uppercase">
               Shape
@@ -359,7 +385,12 @@ function TablesSection() {
               value={shape}
               onValueChange={(v) => v !== null && setShape(v as TableShape)}
             >
-              <SelectTrigger className="min-w-0 flex-1" size="sm" aria-label="Shape for the new table">
+              <SelectTrigger
+                className="min-w-0 flex-1"
+                size="sm"
+                aria-label="Shape for the new table"
+                data-add-autofocus
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -398,7 +429,7 @@ function TablesSection() {
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={add}>
-            <Plus className="h-3 w-3 shrink-0" aria-hidden="true" />
+            <Plus data-icon="inline-start" aria-hidden="true" />
             Add Table
           </Button>
           {shortfall > 0 && (
@@ -406,7 +437,7 @@ function TablesSection() {
               {shortfall} guest{shortfall === 1 ? '' : 's'} without a seat — add {Math.ceil(shortfall / seats)} more
             </Button>
           )}
-        </div>
+        </InlineAddPanel>
         {s.tableOrder.length > 0 && (
           <p className="mt-1.5 px-1 text-xs font-bold">
             <span className={cn(shortfall > 0 ? 'text-brick' : 'text-sage')}>
@@ -418,7 +449,7 @@ function TablesSection() {
       </div>
       {s.tableOrder.length === 0 && (
         <p className="my-1.5 px-1 text-[12.5px] text-ink-soft">
-          No tables yet. Add one above — or ask your agent for “ten rounds of eight”.
+          No tables yet. Use Add table above — or ask your agent for “ten rounds of eight”.
         </p>
       )}
       {s.tableOrder.map((id) => {
@@ -548,6 +579,7 @@ function NewGroupRow(props: { onCreated?: (name: string) => void; onClose: () =>
 
 function GuestsSection() {
   const s = useStore()
+  const [addingGuest, setAddingGuest] = useState(false)
   const [query, setQuery] = useState('')
   const [name, setName] = useState('')
   const [group, setGroup] = useState('')
@@ -555,6 +587,7 @@ function GuestsSection() {
   const [importText, setImportText] = useState('')
   const [showNewGroup, setShowNewGroup] = useState(false)
   const [showListGroup, setShowListGroup] = useState(false)
+  const guestNameRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const NEW_GROUP = '__new_group__'
@@ -593,6 +626,7 @@ function GuestsSection() {
     const guest = s.addGuest({ name: name.trim(), group: activeGroup })
     s.logActivity('add guest', `Added ${guest.name} (${guest.group}).`, 'you')
     setName('')
+    guestNameRef.current?.focus()
   }
 
   const runImport = () => {
@@ -637,11 +671,24 @@ function GuestsSection() {
       {/* Pinned: the composer and the search box stay put while the list under
           them scrolls. Kept compact so the list still gets most of the room. */}
       <div className="sticky top-0 z-10 -mx-1 mb-1 bg-ivory px-1 pt-1 pb-2">
-      <div className="flex flex-col gap-1.5 rounded-lg border bg-parchment/70 p-2">
+      <InlineAddPanel
+        buttonLabel="Add guest"
+        title="New guests"
+        open={addingGuest}
+        onOpenChange={(open) => {
+          setAddingGuest(open)
+          if (!open) {
+            setShowImport(false)
+            setShowNewGroup(false)
+          }
+        }}
+      >
         <div className="flex gap-1.5">
           <Input
+            ref={guestNameRef}
             placeholder="Add a guest…"
             aria-label="Guest name"
+            data-add-autofocus
             className="min-w-0 flex-1"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -715,7 +762,7 @@ function GuestsSection() {
             </Button>
           </div>
         )}
-      </div>
+      </InlineAddPanel>
       <Input
         className="mt-1.5"
         placeholder="Search guests…"
@@ -792,7 +839,7 @@ function GuestsSection() {
         ))}
       {s.guestOrder.length === 0 && (
         <p className="my-1.5 px-1 text-[12.5px] text-ink-soft">
-          The list is empty. Add guests above, paste a list, or press <b>Load Sample Wedding</b> to see Aisle at work.
+          The list is empty. Use Add guest above, or press <b>Load Sample Wedding</b> to see Aisle at work.
         </p>
       )}
     </>
@@ -865,6 +912,7 @@ function GuestPicker(props: {
   onChange: (id: string) => void
   placeholder: string
   exclude?: string
+  autoFocus?: boolean
 }) {
   const s = useStore()
   const items = s.guestOrder
@@ -873,7 +921,13 @@ function GuestPicker(props: {
   const selected = items.find((i) => i.value === props.value) ?? null
   return (
     <Combobox items={items} value={selected} onValueChange={(item) => props.onChange(item?.value ?? '')}>
-      <ComboboxInput size="sm" placeholder={props.placeholder} aria-label={props.placeholder} />
+      <ComboboxInput
+        size="sm"
+        placeholder={props.placeholder}
+        aria-label={props.placeholder}
+        autoFocus={props.autoFocus}
+        data-add-autofocus={props.autoFocus ? '' : undefined}
+      />
       <ComboboxContent>
         <ComboboxEmpty>No guest matches.</ComboboxEmpty>
         <ComboboxList>
@@ -920,7 +974,7 @@ function AddRule() {
   }
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border bg-parchment/70 p-2">
+    <div className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-1.5">
         <Select items={VERB_ITEMS} value={verb} onValueChange={(v) => v !== null && setVerb(v as 'keep' | 'seat')}>
           <SelectTrigger size="sm" className="shrink-0" aria-label="Kind of rule">
@@ -935,7 +989,13 @@ function AddRule() {
           </SelectContent>
         </Select>
         <div className="min-w-[120px] flex-1">
-          <GuestPicker value={a} onChange={setA} placeholder="a guest…" exclude={isPair ? b : undefined} />
+          <GuestPicker
+            value={a}
+            onChange={setA}
+            placeholder="a guest…"
+            exclude={isPair ? b : undefined}
+            autoFocus
+          />
         </div>
         {isPair ? (
           <>
@@ -1014,6 +1074,7 @@ function AddRule() {
 
 function RulesSection() {
   const s = useStore()
+  const [addingRule, setAddingRule] = useState(false)
   const counts = { ok: 0, violated: 0, pending: 0 }
   for (const c of s.constraints) counts[constraintStatus(s, c)]++
 
@@ -1035,7 +1096,14 @@ function RulesSection() {
       {/* Pinned like the guest composer, so the form stays reachable however
           long the rule list gets. */}
       <div className="sticky top-0 z-10 -mx-1 mb-1 bg-ivory px-1 pt-1 pb-2">
-        <AddRule />
+        <InlineAddPanel
+          buttonLabel="Add rule"
+          title="New rules"
+          open={addingRule}
+          onOpenChange={setAddingRule}
+        >
+          <AddRule />
+        </InlineAddPanel>
         {s.constraints.length > 0 && (
           <p className="mt-1.5 px-1 text-xs font-bold">
             <span className="text-sage">{counts.ok} kept</span>
@@ -1046,7 +1114,7 @@ function RulesSection() {
       </div>
       {s.constraints.length === 0 && (
         <p className="my-1.5 px-1 text-[12.5px] text-ink-soft">
-          Rules like “keep the exes apart” live here — add one above, or just tell your agent.
+          Rules like “keep the exes apart” live here — use Add rule above, or just tell your agent.
         </p>
       )}
       {sorted.map((c) => {
@@ -1096,106 +1164,224 @@ function RulesSection() {
 
 // ---- the sidebar ------------------------------------------------------------
 
-export function Sidebar() {
+function SectionNavButton(props: {
+  section: SectionDefinition
+  summary: string
+  active: boolean
+  attention?: boolean
+  onSelect: () => void
+}) {
+  const Icon = props.section.icon
+  return (
+    <button
+      type="button"
+      data-tour={props.section.id}
+      aria-pressed={props.active}
+      aria-controls="sidebar-workspace-panel"
+      onClick={props.onSelect}
+      className={cn(
+        'group flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+        props.active
+          ? 'border-sage/45 bg-parchment shadow-sm'
+          : 'border-transparent hover:border-hairline hover:bg-parchment/55',
+      )}
+    >
+      <span
+        className={cn(
+          'flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
+          props.active ? 'bg-pine-900 text-gold-bright' : 'bg-parchment text-ink-soft group-hover:text-primary',
+        )}
+        aria-hidden="true"
+      >
+        <Icon className="size-3.5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="truncate text-[11.5px] font-bold tracking-[0.08em] text-ink uppercase">
+            {props.section.title}
+          </span>
+          {props.attention ? <span className="size-1.5 shrink-0 rounded-full bg-brick" aria-hidden="true" /> : null}
+        </span>
+        <span className={cn('block truncate text-[10.5px]', props.attention ? 'text-brick' : 'text-ink-faint')}>
+          {props.summary}
+        </span>
+      </span>
+      <ChevronRight
+        className={cn('size-3.5 shrink-0 text-ink-faint transition-transform', props.active && 'rotate-90 text-gold-ink')}
+        aria-hidden="true"
+      />
+    </button>
+  )
+}
+
+/** The chevron that folds the whole sidebar away and brings it back. */
+function CollapseToggle(props: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md border border-hairline bg-parchment/60 text-ink-soft hover:border-sage hover:bg-accent hover:text-primary"
+      aria-expanded={props.open}
+      aria-controls="sidebar-panel"
+      aria-label={props.open ? 'Collapse the sidebar' : 'Expand the sidebar'}
+      title={`${props.open ? 'Collapse' : 'Expand'} the sidebar (⌘B)`}
+      onClick={props.onClick}
+    >
+      <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', props.open && 'rotate-180')} aria-hidden="true" />
+    </button>
+  )
+}
+
+/**
+ * The sidebar folded away to a rail. It stays useful rather than becoming a
+ * dead strip: each section name is a button that opens the sidebar back up
+ * on that section, so getting to the guest list is one click, not two.
+ */
+function SidebarRail(props: {
+  onExpand: () => void
+  onOpenSection: (id: SectionId) => void
+  counts: Record<SectionId, ReactNode>
+}) {
+  return (
+    <aside
+      id="sidebar-panel"
+      className="hidden min-h-0 flex-col items-center gap-1 overflow-hidden border-r border-hairline bg-ivory px-1 pt-1 pb-2 md:flex"
+    >
+      <CollapseToggle open={false} onClick={props.onExpand} />
+      <div className="mt-1 flex min-h-0 flex-col items-center gap-1 overflow-hidden">
+        {SECTIONS.map(({ id, title, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className="relative flex size-7 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-accent hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            aria-label={`Open ${title}`}
+            title={`Open ${title}`}
+            onClick={() => props.onOpenSection(id)}
+          >
+            <Icon className="size-3.5" aria-hidden="true" />
+            {props.counts[id] ? (
+              <span className="absolute -right-0.5 -bottom-0.5 min-w-3 rounded-full bg-pine-900 px-0.5 text-center text-[7px] font-bold leading-3 text-gold-bright">
+                {props.counts[id]}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </aside>
+  )
+}
+
+export function Sidebar({ open: sidebarOpen, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const s = useStore()
+  const [activeSection, setActiveSection] = usePersistedSection('aisle:sidebar:active', 'guests')
   const brokenCount = s.constraints.filter((c) => constraintStatus(s, c) === 'violated').length
+  const pendingRuleCount = s.constraints.filter((c) => constraintStatus(s, c) === 'pending').length
+  const enabledVenueCount = Object.values(s.venue).filter((feature) => feature.enabled).length
+  const attendingCount = s.guestOrder.filter((id) => s.guests[id].rsvp !== 'no').length
+  const capacity = s.tableOrder.reduce((sum, id) => sum + s.tables[id].seats, 0)
 
-  const [open, setOpenMap] = usePersistedJSON<Record<SectionId, boolean>>('aisle:sidebar:open', {
-    venue: true,
-    tables: true,
-    guests: true,
-    activity: true,
-    rules: false,
-  })
-  const setOpen = (id: SectionId, v: boolean) => setOpenMap({ ...open, [id]: v })
+  const counts: Record<SectionId, ReactNode> = {
+    venue: enabledVenueCount,
+    tables: s.tableOrder.length,
+    guests: s.guestOrder.length,
+    activity: s.agentLog.length,
+    rules: brokenCount > 0 ? '!' : s.constraints.length,
+  }
 
-  // A drag (or agent move) that breaks a rule pops the section open, so the
-  // cause of the new warning is on screen next to its effect.
-  const prevBroken = useRef(brokenCount)
-  useEffect(() => {
-    if (brokenCount > prevBroken.current && !open.rules) setOpen('rules', true)
-    prevBroken.current = brokenCount
-  })
+  const summaries: Record<SectionId, string> = {
+    venue: `${enabledVenueCount} items · ${formatFeet(s.venueDimensions.widthFt)} × ${formatFeet(s.venueDimensions.lengthFt)}`,
+    tables: s.tableOrder.length > 0
+      ? `${s.tableOrder.length} table${s.tableOrder.length === 1 ? '' : 's'} · ${capacity} seats`
+      : 'No tables yet',
+    guests: s.guestOrder.length > 0
+      ? `${s.guestOrder.length} guest${s.guestOrder.length === 1 ? '' : 's'} · ${attendingCount} attending`
+      : 'No guests yet',
+    rules: brokenCount > 0
+      ? `${brokenCount} broken · ${s.constraints.length} total`
+      : s.constraints.length > 0
+        ? `${s.constraints.length} total · ${pendingRuleCount > 0 ? `${pendingRuleCount} waiting` : 'all clear'}`
+        : 'No rules yet',
+    activity: s.agentLog.length > 0
+      ? `${s.agentLog.length} recent update${s.agentLog.length === 1 ? '' : 's'}`
+      : 'No recent activity',
+  }
 
-  const [weights, setWeights] = usePersistedJSON<Record<SectionId, number>>('aisle:sidebar:weights', DEFAULT_WEIGHTS)
+  if (!sidebarOpen) {
+    return (
+      <SidebarRail
+        counts={counts}
+        onExpand={() => onOpenChange(true)}
+        onOpenSection={(id) => {
+          setActiveSection(id)
+          onOpenChange(true)
+        }}
+      />
+    )
+  }
 
   return (
-    <aside className="hidden min-h-0 flex-col overflow-hidden border-r border-hairline bg-ivory px-2 pt-1 pb-2 md:flex">
-      <Section
-        id="venue"
-        title="Venue"
-        count={`${Object.values(s.venue).filter((feature) => feature.enabled).length}/${VENUE_FEATURES.length}`}
-        open={open.venue}
-        onOpenChange={(v) => setOpen('venue', v)}
-        minHeight={MIN_HEIGHTS.venue}
-        weight={weights.venue}
+    <aside
+      id="sidebar-panel"
+      className="hidden min-h-0 flex-col overflow-hidden border-r border-hairline bg-ivory px-2 pt-1 pb-2 md:flex"
+    >
+      {/* A slim rail of its own above the sections, so the control sits in the
+          same place whether the sidebar is open or folded away. */}
+      <div className="mb-0.5 flex shrink-0 items-center justify-between gap-2 border-b border-hairline/70 pb-1">
+        <span className="pl-1 text-[10px] font-bold tracking-[0.16em] text-ink-faint uppercase">The plan</span>
+        <CollapseToggle open onClick={() => onOpenChange(false)} />
+      </div>
+      <nav className="flex shrink-0 flex-col gap-0.5 border-b border-hairline/70 px-0.5 py-1" aria-label="Plan sections">
+        {PRIMARY_SECTIONS.map((section) => (
+          <SectionNavButton
+            key={section.id}
+            section={section}
+            summary={summaries[section.id]}
+            active={activeSection === section.id}
+            attention={section.id === 'rules' && brokenCount > 0}
+            onSelect={() => setActiveSection(section.id)}
+          />
+        ))}
+      </nav>
+
+      <section
+        id="sidebar-workspace-panel"
+        role="region"
+        aria-label={`${SECTIONS.find(({ id }) => id === activeSection)?.title ?? 'Plan'} workspace`}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-2"
       >
-        <VenueSection />
-      </Section>
-      <ResizeHandle above="venue" below="tables" active={open.venue && open.tables} weights={weights} setWeights={setWeights} />
-      <Section
-        id="tables"
-        title="Tables"
-        count={s.tableOrder.length}
-        open={open.tables}
-        onOpenChange={(v) => setOpen('tables', v)}
-        minHeight={MIN_HEIGHTS.tables}
-        weight={weights.tables}
-      >
-        <TablesSection />
-      </Section>
-      <ResizeHandle above="tables" below="guests" active={open.tables && open.guests} weights={weights} setWeights={setWeights} />
-      <Section
-        id="guests"
-        title="Guests"
-        count={s.guestOrder.length}
-        open={open.guests}
-        onOpenChange={(v) => setOpen('guests', v)}
-        minHeight={MIN_HEIGHTS.guests}
-        weight={weights.guests}
-      >
-        <GuestsSection />
-      </Section>
-      <ResizeHandle above="guests" below="activity" active={open.guests && open.activity} weights={weights} setWeights={setWeights} />
-      <Section
-        id="activity"
-        title="Activity"
-        count={s.agentLog.length > 0 ? `${s.agentLog.length} steps` : undefined}
-        open={open.activity}
-        onOpenChange={(v) => setOpen('activity', v)}
-        minHeight={MIN_HEIGHTS.activity}
-        weight={weights.activity}
-        headerAction={
-          s.agentLog.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="shrink-0"
-              onClick={() => {
-                s.clearActivity()
-                s.setToast('Activity cleared.')
-              }}
-            >
-              Clear
-            </Button>
-          )
-        }
-      >
-        <ActivitySection />
-      </Section>
-      <ResizeHandle above="activity" below="rules" active={open.activity && open.rules} weights={weights} setWeights={setWeights} />
-      <Section
-        id="rules"
-        title="House rules"
-        count={s.constraints.length}
-        open={open.rules}
-        onOpenChange={(v) => setOpen('rules', v)}
-        minHeight={MIN_HEIGHTS.rules}
-        weight={weights.rules}
-        closedExtra={brokenCount > 0 ? <span className="text-[11px] text-brick">· {brokenCount} broken</span> : undefined}
-      >
-        <RulesSection />
-      </Section>
+        {activeSection === 'venue' ? <VenueSection /> : null}
+        {activeSection === 'tables' ? <TablesSection /> : null}
+        {activeSection === 'guests' ? <GuestsSection /> : null}
+        {activeSection === 'rules' ? <RulesSection /> : null}
+        {activeSection === 'activity' ? (
+          <div className="flex flex-col gap-1 pt-1">
+            <div className="sticky top-0 z-10 -mx-1 flex items-center justify-between gap-2 bg-ivory px-2 py-1.5">
+              <span className="text-[10.5px] font-bold tracking-[0.1em] text-ink-soft uppercase">Recent activity</span>
+              {s.agentLog.length > 0 ? (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => {
+                    s.clearActivity()
+                    s.setToast('Activity cleared.')
+                  }}
+                >
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+            <ActivitySection />
+          </div>
+        ) : null}
+      </section>
+
+      <div className="shrink-0 border-t border-hairline/70 px-0.5 pt-1">
+        <SectionNavButton
+          section={ACTIVITY_SECTION}
+          summary={summaries.activity}
+          active={activeSection === 'activity'}
+          onSelect={() => setActiveSection('activity')}
+        />
+      </div>
     </aside>
   )
 }

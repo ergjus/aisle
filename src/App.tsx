@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
+import { cn } from '@/lib/utils'
 import { useStore } from './store'
 import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
@@ -8,6 +9,16 @@ import { readFirstRunGate, readOnboardingRecord } from './onboarding/storage'
 
 const OnboardingExperience = lazy(() => import('./onboarding/OnboardingExperience'))
 
+const SIDEBAR_KEY = 'aisle:sidebar:collapsed'
+
+function readSidebarOpen(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) !== '1'
+  } catch {
+    return true
+  }
+}
+
 export default function App() {
   const toast = useStore((s) => s.toast)
   const setToast = useStore((s) => s.setToast)
@@ -16,18 +27,34 @@ export default function App() {
     return readFirstRunGate(state.guestOrder.length > 0 || state.tableOrder.length > 0)
   })
   const [guideRequest, setGuideRequest] = useState(0)
+  const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
   const [loadOnboardingBundle, setLoadOnboardingBundle] = useState(() => {
     const record = readOnboardingRecord()
     return initialFirstRun || record?.challenge.status === 'active'
   })
 
+  const setSidebar = (open: boolean) => {
+    setSidebarOpen(open)
+    try {
+      localStorage.setItem(SIDEBAR_KEY, open ? '0' : '1')
+    } catch {
+      // Preference simply won't stick.
+    }
+  }
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey
-      if (!meta || e.key.toLowerCase() !== 'z') return
+      if (!meta) return
+      const key = e.key.toLowerCase()
+      if (key !== 'z' && key !== 'b') return
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       e.preventDefault()
+      if (key === 'b') {
+        setSidebar(!readSidebarOpen())
+        return
+      }
       const store = useStore.getState()
       if (e.shiftKey) store.redo()
       else store.undo()
@@ -50,8 +77,15 @@ export default function App() {
           setGuideRequest((request) => request + 1)
         }}
       />
-      <div className="grid min-h-0 grid-cols-1 md:grid-cols-[248px_minmax(0,1fr)]">
-        <Sidebar />
+      {/* The sidebar folds down to a rail so the floor plan can have the whole
+          window; the grid column animates rather than snapping. */}
+      <div
+        className={cn(
+          'grid min-h-0 grid-cols-1 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none',
+          sidebarOpen ? 'md:grid-cols-[248px_minmax(0,1fr)]' : 'md:grid-cols-[34px_minmax(0,1fr)]',
+        )}
+      >
+        <Sidebar open={sidebarOpen} onOpenChange={setSidebar} />
         <Canvas />
       </div>
       <Editors />

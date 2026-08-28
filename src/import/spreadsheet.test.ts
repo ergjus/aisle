@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { guestEntriesFromRows, parseDelimited, readSpreadsheet, SpreadsheetError } from './spreadsheet'
+import { guestEntriesFromRows, guestEntriesFromText, parseDelimited, readSpreadsheet, SpreadsheetError } from './spreadsheet'
 
 // ---- a real .xlsx, assembled byte by byte -----------------------------------
 
@@ -198,5 +198,50 @@ describe('mapping rows to guests', () => {
   it('leaves RSVP unset for words it does not recognise, rather than guessing', () => {
     const result = guestEntriesFromRows([['Name', 'RSVP'], ['Ana', 'possibly?']])
     expect(result.entries[0].rsvp).toBeUndefined()
+  })
+})
+
+describe('reading a list an agent pasted', () => {
+  it('reads spreadsheet rows pasted as CSV, header and all', () => {
+    const entries = guestEntriesFromText('Name,Side,RSVP\nNora Flynn,Childhood friends,yes\n')
+    expect(entries).toEqual([
+      { name: 'Nora Flynn', group: 'Childhood friends', rsvp: 'yes', dietary: undefined, notes: undefined },
+    ])
+  })
+
+  it('reads tab-separated rows, which only ever mean columns', () => {
+    const entries = guestEntriesFromText('Nora Flynn\tChildhood friends')
+    expect(entries).toEqual([{ name: 'Nora Flynn', group: 'Childhood friends' }])
+  })
+
+  it('still reads the paste box’s own em-dash format', () => {
+    const entries = guestEntriesFromText('Nora Flynn — Childhood friends — vegetarian')
+    expect(entries[0]).toMatchObject({ name: 'Nora Flynn', group: 'Childhood friends', dietary: ['vegetarian'] })
+  })
+
+  it('treats a lone comma as part of the name, not a column break', () => {
+    // "Last, First" lists are common; two comma-separated fields with no
+    // header are not enough evidence to split them into name and group.
+    expect(guestEntriesFromText('Flynn, Nora\nIyer, Raj')).toEqual([
+      { name: 'Flynn, Nora', group: undefined },
+      { name: 'Iyer, Raj', group: undefined },
+    ])
+  })
+
+  it('does split comma rows once a header names the columns', () => {
+    const entries = guestEntriesFromText('Guest,Party\nFlynn Nora,Cousins')
+    expect(entries).toEqual([
+      { name: 'Flynn Nora', group: 'Cousins', rsvp: undefined, dietary: undefined, notes: undefined },
+    ])
+  })
+
+  it('still accepts a JSON array', () => {
+    const entries = guestEntriesFromText('[{"name":"Ana Ruiz","group":"Work friends"}]')
+    expect(entries[0]).toMatchObject({ name: 'Ana Ruiz', group: 'Work friends' })
+  })
+
+  it('applies the default group only where a row leaves one out', () => {
+    const entries = guestEntriesFromText('Name,Group\nAna,\nBo,Cousins\n', 'Sailing club')
+    expect(entries.map((e) => e.group)).toEqual(['Sailing club', 'Cousins'])
   })
 })

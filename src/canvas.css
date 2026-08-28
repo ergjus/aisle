@@ -239,7 +239,10 @@
 
 .venue-feature.dragging,
 .venue-feature.resizing,
-.venue-feature.rotating {
+.venue-feature.rotating,
+/* Every piece in a multi-select — and every piece the room's walls are
+   pushing around — has to track the pointer 1:1, not just the one under it. */
+.venue-feature.live {
   transition: box-shadow 150ms ease, border-color 150ms ease, filter 150ms ease;
 }
 
@@ -737,6 +740,14 @@
   transform-origin: 50% 50%;
 }
 
+/* How furniture travels when something other than the pointer moves it — an
+   agent's placement, a rule repair, the room being resized. The class is
+   dropped while the pointer is dragging the piece, so that stays 1:1. */
+.table-wrap.glide,
+.seat-dot.glide {
+  transition: transform 500ms ease;
+}
+
 .table {
   position: relative;
   display: flex;
@@ -875,11 +886,12 @@
 
 .seat-dot {
   position: absolute;
+  top: 0;
+  left: 0;
   width: 9px;
   height: 9px;
   border-radius: 50%;
   border: 1.5px solid rgba(236, 223, 195, 0.5);
-  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
@@ -1333,7 +1345,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .chip,
-  .venue-feature {
+  .venue-feature,
+  .table-wrap.glide,
+  .seat-dot.glide {
     transition: none;
   }
 

@@ -446,6 +446,24 @@ export function Canvas() {
   }, [unseatedCount, loungeCollapsed])
   const unitsPerFoot = stageUnitsPerFoot(s.venueDimensions)
 
+  // Furniture the pointer is currently moving: the piece under the cursor, the
+  // rest of its multi-selection, and — while a wall is being dragged —
+  // everything the room is nudging. These follow the pointer exactly; anything
+  // else glides, so an agent's placement reads as a move rather than a jump.
+  const live = useMemo(() => {
+    const ids = new Set<string>()
+    if (!drag) return ids
+    if (drag.kind === 'resize-venue') {
+      for (const id of s.tableOrder) ids.add(layoutKey('table', id))
+      for (const feature of Object.values(s.venue)) ids.add(layoutKey('feature', feature.id))
+      return ids
+    }
+    if (drag.kind === 'rotate-table') ids.add(layoutKey('table', drag.id))
+    if (drag.kind === 'rotate-feature' || drag.kind === 'resize-feature') ids.add(layoutKey('feature', drag.id))
+    for (const item of drag.layoutOrigins ?? []) ids.add(layoutKey(item.kind, item.id))
+    return ids
+  }, [drag, s.tableOrder, s.venue])
+
   // One warning list per piece of furniture: what it sits on top of, and
   // whether it has been pushed past a wall. Both read from the shared
   // geometry, so the badges say exactly what the agent's tools report.
@@ -925,6 +943,7 @@ export function Canvas() {
               dimensions={s.venueDimensions}
               selected={layoutSelection.some((entry) => layoutKey(entry.kind, entry.id) === layoutKey('feature', feature.id))}
               highlighted={s.ruleHighlight?.zone === feature.id}
+              live={live.has(layoutKey('feature', feature.id))}
               warnings={warnings.get(layoutKey('feature', feature.id)) ?? []}
               active={
                 (drag?.kind === 'feature' || drag?.kind === 'resize-feature' || drag?.kind === 'rotate-feature') && drag.id === feature.id
@@ -1013,7 +1032,7 @@ export function Canvas() {
               layoutSelected={layoutSelection.some((entry) => layoutKey(entry.kind, entry.id) === layoutKey('table', tid))}
               warnings={warnings.get(layoutKey('table', tid)) ?? []}
               dropTarget={isTarget}
-              dragging={drag?.kind === 'table' && drag.id === tid}
+              live={live.has(layoutKey('table', tid))}
               rotating={drag?.kind === 'rotate-table' && drag.id === tid}
               onPointerDown={(e) => beginDrag(e, 'table', tid, { x: t.x, y: t.y })}
               onRotatePointerDown={(e) => beginRotate(e, 'rotate-table', tid)}
@@ -1041,10 +1060,19 @@ export function Canvas() {
               .filter((a) => a.tableId === tid)
               .map((a) => a.seat),
           )
+          // Positioned by transform, like the table itself, so an empty seat
+          // travels with its table instead of snapping ahead of it.
+          const glide = live.has(layoutKey('table', tid)) ? '' : ' glide'
           return Array.from({ length: t.seats }, (_, i) => {
             if (occSeats.has(i)) return null
             const p = seatPos(t, i, s.venueDimensions)
-            return <span key={`${tid}-${i}`} className="seat-dot" style={{ left: p.x, top: p.y }} />
+            return (
+              <span
+                key={`${tid}-${i}`}
+                className={`seat-dot${glide}`}
+                style={{ transform: `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)` }}
+              />
+            )
           })
         })}
 
@@ -1255,6 +1283,8 @@ function VenueFeatureView(props: {
   highlighted?: boolean
   /** Layout problems to badge, e.g. "overlaps Table 3", "reaches 2′ past the wall". */
   warnings: string[]
+  /** The pointer is moving this amenity right now, so it must not lag behind it. */
+  live: boolean
   active: 'feature' | 'resize-feature' | 'rotate-feature' | null
   onPointerDown: (e: React.PointerEvent) => void
   onResizePointerDown: (e: React.PointerEvent) => void
@@ -1272,7 +1302,7 @@ function VenueFeatureView(props: {
   const densityClass = `${compact ? ' compact' : ''}${micro ? ' micro' : ''}${horizontal ? ' horizontal-content' : ''}`
   return (
     <div
-      className={`venue-feature venue-feature-${feature.id}${densityClass}${props.selected ? ' selected' : ''}${props.highlighted ? ' rule-glow' : ''}${props.warnings.length ? ' overlapping' : ''}${active ? ` ${active === 'feature' ? 'dragging' : active === 'rotate-feature' ? 'rotating' : 'resizing'}` : ''}`}
+      className={`venue-feature venue-feature-${feature.id}${densityClass}${props.selected ? ' selected' : ''}${props.highlighted ? ' rule-glow' : ''}${props.warnings.length ? ' overlapping' : ''}${props.live ? ' live' : ''}${active ? ` ${active === 'feature' ? 'dragging' : active === 'rotate-feature' ? 'rotating' : 'resizing'}` : ''}`}
       style={{ left: feature.x, top: feature.y, width: feature.w, height: feature.h, transform: `rotate(${feature.rotation ?? 0}deg)` }}
       role="group"
       aria-label={`${feature.label}, ${formatFeet(measured.w)} by ${formatFeet(measured.h)}${props.warnings.length ? `, ${props.warnings.join(', ')}` : ''}`}
@@ -1334,14 +1364,15 @@ function TableView(props: {
   /** Layout problems to badge, e.g. "overlaps Table 3", "reaches 2′ past the wall". */
   warnings: string[]
   dropTarget: boolean
-  dragging: boolean
+  /** The pointer is moving this table right now, so it must not lag behind it. */
+  live: boolean
   rotating: boolean
   onPointerDown: (e: React.PointerEvent) => void
   onRotatePointerDown: (e: React.PointerEvent) => void
   onRotate: () => void
   onKeyDown: (e: React.KeyboardEvent) => void
 }) {
-  const { table, size, occupied, badge, touchedAt, selected, layoutSelected, dropTarget, dragging, rotating } = props
+  const { table, size, occupied, badge, touchedAt, selected, layoutSelected, dropTarget, live, rotating } = props
   const flashing = touchedAt !== undefined && Date.now() - touchedAt < 4000
 
   const cls = ['table', table.shape, (selected || layoutSelected) && 'selected', props.warnings.length && 'overlapping', dropTarget && 'drop-target']
@@ -1350,12 +1381,11 @@ function TableView(props: {
 
   return (
     <div
-      className={`table-wrap${selected || layoutSelected ? ' selected' : ''}${rotating ? ' rotating' : ''}`}
+      className={`table-wrap${selected || layoutSelected ? ' selected' : ''}${rotating ? ' rotating' : ''}${live || rotating ? '' : ' glide'}`}
       style={{
         transform: `translate(${table.x}px, ${table.y}px) translate(-50%, -50%) rotate(${table.rotation ?? 0}deg)`,
         width: size.w,
         height: size.h,
-        transition: dragging || rotating ? 'none' : 'transform 500ms ease',
       }}
     >
       <div

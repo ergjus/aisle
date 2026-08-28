@@ -33,7 +33,7 @@ No login, no backend. State lives in your browser's localStorage.
 
 Aisle registers its tools through `navigator.modelContext` (with fallbacks for `document.modelContext` / `window.modelContext` across preview builds, and `provideContext` for older drafts). Every tool has a natural-language description and a JSON Schema; read-only tools carry `readOnlyHint` annotations. Guests and tables are addressed by **fuzzy name** — agents say `"Grandma"` or `"Table 4"`, and ambiguity comes back as a helpful error listing candidates.
 
-**Always registered (16):**
+**Always registered (23):**
 
 | Tool | What it does |
 | --- | --- |
@@ -43,10 +43,13 @@ Aisle registers its tools through `navigator.modelContext` (with fallbacks for `
 | `explain_seating` | *Why is she there?* One guest's seat, tablemates, group context, and every rule involving them with live status — including how near/far their table actually is from the dance floor, band, or entrance |
 | `save_checkpoint` / `restore_checkpoint` | Named save points over the whole chart. The agent checkpoints before a bold experiment; if the human hates the result, one call puts everything back — and the restore itself is undoable |
 | `add_guest` / `update_guest` / `remove_guest` | Guest management; setting RSVP "no" frees the seat |
-| `import_guests` | Bulk import from pasted text or JSON — one guest per line with optional group, dietary, RSVP |
-| `add_table` | Add a named table (2–16 seats, round or banquet) in an open spot |
+| `import_guests` | Bulk import from spreadsheet rows (CSV/TSV, header row read and its columns mapped in any order), from one-guest-per-line text, or from JSON |
+| `add_group` / `remove_group` | Name a party before anyone is in it; drop one once it's empty |
+| `add_table` | Add a table (2–16 seats, round or banquet) in an open spot — or a whole row of them with `count`, as one undoable step |
 | `add_constraint` | `must_sit_together`, `must_sit_apart`, or near/far rules for the dance floor, band, and entrance |
 | `remove_constraint` / `list_constraints` | Manage rules by id or by guest |
+| `undo` / `redo` | The same history the human's ⌘Z walks, agent edits and theirs alike; `steps` walks back several at once |
+| `reset_chart` | Clears the room, exactly as the header's Reset does. Refuses without `confirm: true`, so it can only follow an explicit request |
 | `load_sample_wedding` | The demo wedding, one call away |
 
 **Registered only while tables exist (10):**
@@ -56,7 +59,7 @@ Aisle registers its tools through `navigator.modelContext` (with fallbacks for `
 | `seat_guest` / `unseat_guest` / `swap_guests` | Seat-level operations; a full table fails with the list of tables that still have space |
 | `auto_arrange` | The solver. `mode: "full"` redesigns the room; `mode: "repair"` fixes violations while moving as few guests as possible. Returns a plain-language explanation of what it honored and what it couldn't |
 | `propose_arrangement` | `auto_arrange` as a **question**: the arrangement plays out live under a Keep/Revert banner, and the tool call **blocks until the human decides** (or ~30s pass), then reports the verdict. Any further edit quietly adopts a pending proposal; undo rejects it |
-| `update_table` / `remove_table` | Resize, rename, reshape, remove — displaced guests go politely back to the lounge |
+| `update_table` / `remove_table` | Rename, resize, reshape, rotate, reposition in real feet, remove — the table glides to its new spot rather than jumping, and displaced guests go politely back to the lounge |
 | `clear_seating` / `list_unseated` / `list_violations` | Bulk reset and read tools for reasoning before acting |
 
 **Registered while the chart has anything in it (2):**
@@ -76,7 +79,7 @@ That last one is the dynamic-registration story in miniature: the *toolset itsel
 
 ## Human controls stay first-class
 
-Everything the agent can do, you can do by hand on the same state:
+Everything the agent can do, you can do by hand on the same state — and everything you can do by hand, it can do too. The two sets are kept level on purpose:
 
 - **Drag** any guest chip between tables and the lounge; drag tables around the room (zone rules like "near the dance floor" are computed from real table positions, so moving a table can genuinely fix — or cause — a violation).
 - **Click** any chip or table to edit details in place — or Tab to it and press Enter; the canvas is keyboard-accessible.
