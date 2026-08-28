@@ -1,6 +1,6 @@
 import { getCore, occupantsOf, useStore } from '../store'
 import type { AisleState, Guest, RSVP, Table, VenueFeatureId, ZoneId } from '../types'
-import { ROOM, featureMinSize, feetSize, formatFeet, roomRect, stageUnitsPerFoot, tableBodyBounds } from '../geometry'
+import { ROOM, featureMinSize, feetSize, formatFeet, layoutConflicts, roomRect, stageUnitsPerFoot, tableBodyBounds } from '../geometry'
 import { computeViolations, constraintStatus, constraintText, dramaLabel, dramaScore } from '../constraints'
 import { autoArrange } from '../solver'
 import { SAMPLE } from '../sample'
@@ -22,6 +22,27 @@ function ok(text: string, touched?: string[]): HandlerResult {
 
 function fail(text: string): HandlerResult {
   return { text, isError: true }
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/** Never let a stuck animation hold a tool reply hostage. */
+const MAX_CHOREOGRAPHY_WAIT_MS = 16000
+
+// ---- layout conflicts ------------------------------------------------------
+
+/** "Table 2 overlaps Dance floor"-style lines for the whole floor plan. */
+function conflictLines(state: AisleState): string[] {
+  return layoutConflicts(state).map((c) => `${c.aLabel} overlaps ${c.bLabel}`)
+}
+
+/** Warning suffix for tool replies that placed, resized, or rotated `ids`. */
+function overlapWarning(state: AisleState, ids: string[]): string {
+  const involved = layoutConflicts(state).filter((c) => ids.includes(c.aId) || ids.includes(c.bId))
+  if (involved.length === 0) return ''
+  return ` ⚠ Overlapping: ${involved
+    .map((c) => `${c.aLabel} × ${c.bLabel}`)
+    .join(', ')} — move, shrink, or rotate one of them to clear the conflict.`
 }
 
 // ---- fuzzy lookup ----------------------------------------------------------
@@ -111,6 +132,11 @@ function roomSummary(state: AisleState): string {
   }
   const unseated = attending.filter((id) => !state.seating[id])
   if (unseated.length) lines.push(`Unseated: ${unseated.map((id) => state.guests[id].name).join(', ')}`)
+  const conflicts = conflictLines(state)
+  if (conflicts.length) {
+    lines.push('Layout conflicts (furniture on top of each other — fix by moving, shrinking, or rotating via update_table / update_venue):')
+    for (const c of conflicts) lines.push(`  ⚠ ${c}`)
+  }
   if (state.constraints.length) {
     lines.push('Constraints:')
     for (const c of state.constraints) {
@@ -225,12 +251,13 @@ function makeTool(
       if (!opts.readOnly || result.isError) {
         useStore.getState().logActivity(name, result.text.split('\n')[0].slice(0, 140), 'agent')
       }
+      let played: Promise<void> = Promise.resolve()
       if (!result.isError) {
         try {
           if (opts.readOnly) {
             if (READ_GLANCES[name]) glance(READ_GLANCES[name])
           } else {
-            choreograph({
+            played = choreograph({
               tool: name,
               summary: result.text,
               before,
@@ -243,6 +270,10 @@ function makeTool(
         }
       }
       if (result.touched?.length) useStore.getState().markTouched(result.touched)
+      // The reply is the tool call's "end": hold it until the cursor has acted
+      // the change out, so a burst of calls plays as one legible sequence
+      // instead of everything snapping into place at once.
+      await Promise.race([played, sleep(MAX_CHOREOGRAPHY_WAIT_MS)]).catch(() => undefined)
       return {
         content: [{ type: 'text', text: result.text }],
         ...(result.isError ? { isError: true } : {}),
@@ -257,7 +288,7 @@ function baseTools(): WebTool[] {
   return [
     makeTool(
       'update_venue',
-      'Configure the shared venue floor plan. Show, hide, place, resize, and rotate the entrance, dance floor, band & speakers, restrooms, photo booth, bar, buffet & catering, cake table, or gifts & cards table. Prefer the real-world *_ft fields, measured from the room’s top-left; legacy x/y/width/height floor-plan units remain supported. The human sees the same saved layout and can adjust it afterward.',
+      'Configure the shared venue floor plan. Show, hide, place, resize, and rotate the entrance, dance floor, band & speakers, restrooms, photo booth, bar, buffet & catering, cake table, or gifts & cards table. Prefer the real-world *_ft fields, measured from the room’s top-left; legacy x/y/width/height floor-plan units remain supported. The reply warns if the amenity now overlaps a table or another amenity. The human sees the same saved layout and can adjust it afterward.',
       obj(
         {
           feature: str('Venue amenity to change', { enum: VENUE_FEATURE_IDS }),
@@ -312,7 +343,7 @@ function baseTools(): WebTool[] {
         const after = getCore().venue[id]
         const afterSize = feetSize(after.w, after.h, getCore().venueDimensions)
         return ok(
-          `${after.label} is ${after.enabled ? `shown at (${formatFeet((after.x - room.x) / units.x)}, ${formatFeet((after.y - room.y) / units.y)}), sized ${formatFeet(afterSize.w)} × ${formatFeet(afterSize.h)}, rotated ${Math.round(after.rotation)}°` : 'hidden'}.`,
+          `${after.label} is ${after.enabled ? `shown at (${formatFeet((after.x - room.x) / units.x)}, ${formatFeet((after.y - room.y) / units.y)}), sized ${formatFeet(afterSize.w)} × ${formatFeet(afterSize.h)}, rotated ${Math.round(after.rotation)}°` : 'hidden'}.${after.enabled ? overlapWarning(getCore(), [id]) : ''}`,
           [id],
         )
       },
@@ -461,7 +492,7 @@ function baseTools(): WebTool[] {
     ),
     makeTool(
       'add_table',
-      'Add a table to the room. Choose a name, seat count (2–16), shape (round or rect), and optionally where its center goes in real-world feet from the room’s top-left, plus a rotation. Without a position it lands in an open spot; the human can drag or rotate it afterwards.',
+      'Add a table to the room. Choose a name, seat count (2–16), shape (round or rect), and optionally where its center goes in real-world feet from the room’s top-left, plus a rotation. Without a position it lands in an open spot; the human can drag or rotate it afterwards. The reply warns if the placement overlaps other furniture.',
       obj({
         name: str('Table name, e.g. "Table 11" or "Head table"; auto-numbered if omitted'),
         seats: { type: 'integer', minimum: 2, maximum: 16, description: 'Number of seats (default 8)' },
@@ -503,7 +534,7 @@ function baseTools(): WebTool[] {
         const units = stageUnitsPerFoot(dimensions)
         const room = roomRect(dimensions)
         return ok(
-          `Added ${table.name} (${table.shape}, ${table.seats} seats), centered at (${formatFeet((table.x - room.x) / units.x)}, ${formatFeet((table.y - room.y) / units.y)})${table.rotation ? `, rotated ${Math.round(table.rotation)}°` : ''}.`,
+          `Added ${table.name} (${table.shape}, ${table.seats} seats), centered at (${formatFeet((table.x - room.x) / units.x)}, ${formatFeet((table.y - room.y) / units.y)})${table.rotation ? `, rotated ${Math.round(table.rotation)}°` : ''}.${overlapWarning(getCore(), [table.id])}`,
           [table.id],
         )
       },
@@ -624,7 +655,7 @@ function seatingTools(): WebTool[] {
   return [
     makeTool(
       'update_table',
-      'Rename, resize, rotate, or reposition a table using real-world feet from the room’s top-left. Shrinking a table below its occupancy politely bumps the extra guests back to the lounge.',
+      'Rename, resize, rotate, or reposition a table using real-world feet from the room’s top-left. Shrinking a table below its occupancy politely bumps the extra guests back to the lounge. The reply warns if the table now overlaps another table or an amenity.',
       obj(
         {
           table: str('Table to change, by name'),
@@ -675,6 +706,7 @@ function seatingTools(): WebTool[] {
         if (unseated.length) {
           text += ` ${unseated.map((id) => state.guests[id]?.name).join(', ')} lost their seat${unseated.length === 1 ? '' : 's'} and moved to the lounge.`
         }
+        text += overlapWarning(getCore(), [r.hit.id])
         return ok(text, [r.hit.id, ...unseated])
       },
     ),
@@ -752,7 +784,7 @@ function seatingTools(): WebTool[] {
     ),
     makeTool(
       'auto_arrange',
-      'Arrange the seating automatically, honoring every rule: couples together, feuds apart, near/far zone preferences, groups kept coherent, tables balanced. mode "full" (default) redesigns the whole room; mode "repair" fixes current violations and seats stragglers while moving as few guests as possible — use it after the human hand-moves someone into trouble. Returns a plain-language explanation of what it did and anything it could not satisfy. The chart animates the changes.',
+      'Arrange the seating automatically, honoring every rule: couples together, feuds apart, near/far zone preferences, groups kept coherent, tables balanced. mode "full" (default) redesigns the whole room; mode "repair" fixes current violations and seats stragglers while moving as few guests as possible — use it after the human hand-moves someone into trouble. Returns a plain-language explanation of what it did and anything it could not satisfy. The chart animates the changes table by table and the reply waits for the animation, so the call may take several seconds — that is normal.',
       obj({
         mode: str('"full" re-seats everyone; "repair" makes minimal fixes', { enum: ['full', 'repair'] }),
       }),
@@ -797,15 +829,21 @@ function seatingTools(): WebTool[] {
     ),
     makeTool(
       'list_violations',
-      'List every seating rule currently being violated, plus the drama score. An empty list means the room is at peace.',
+      'List every seating rule currently being violated (plus the drama score), and any floor-plan conflicts where tables or amenities physically overlap. An empty list means the room is at peace.',
       obj({}),
       () => {
         const state = getCore()
         const violations = computeViolations(state)
-        if (violations.length === 0) return ok('No violations — the room is at peace. Drama: Serene.')
+        const conflicts = conflictLines(state)
+        const conflictBlock = conflicts.length
+          ? `\n${conflicts.length} layout conflict${conflicts.length === 1 ? '' : 's'}:\n${conflicts.map((c) => `⚠ ${c}`).join('\n')}\nFix overlaps by moving, shrinking, or rotating with update_table / update_venue.`
+          : ''
+        if (violations.length === 0) {
+          return ok(`No seating violations — the room is at peace. Drama: Serene.${conflictBlock}`)
+        }
         const score = dramaScore(violations)
         return ok(
-          `${violations.length} violation${violations.length === 1 ? '' : 's'} · drama: ${dramaLabel(score)} (${score})\n${violations.map((v) => `⚠ ${v.text}`).join('\n')}\nauto_arrange(mode:"repair") fixes these with minimal moves.`,
+          `${violations.length} violation${violations.length === 1 ? '' : 's'} · drama: ${dramaLabel(score)} (${score})\n${violations.map((v) => `⚠ ${v.text}`).join('\n')}\nauto_arrange(mode:"repair") fixes these with minimal moves.${conflictBlock}`,
         )
       },
       { readOnly: true },
@@ -843,7 +881,11 @@ function finalizeTools(): WebTool[] {
           lines.push('## Dietary summary')
           for (const g of dietary) lines.push(`- ${g.name}: ${g.dietary.join(', ')}`)
         }
-        return ok(`Chart finalized and locked in. 🥂\n\n${lines.join('\n')}`)
+        const conflicts = conflictLines(state)
+        const conflictNote = conflicts.length
+          ? `\n\nNote: the floor plan still has overlapping furniture — ${conflicts.join('; ')}. Consider fixing with update_table / update_venue.`
+          : ''
+        return ok(`Chart finalized and locked in. 🥂\n\n${lines.join('\n')}${conflictNote}`)
       },
     ),
   ]

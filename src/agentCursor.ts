@@ -31,6 +31,8 @@ export interface CursorPerformance {
   onlyIfVisible?: boolean
   /** Timed to match delayed chip transitions — never rushed or dropped. */
   synced?: boolean
+  /** Resolves the enqueuer's promise once played (or dropped/skipped). */
+  done?: () => void
 }
 
 // Matches --chip-move in canvas.css so a carried chip and the cursor arrive together.
@@ -41,6 +43,10 @@ const GRAB_HOLD_MS = 150
 const DROP_HOLD_MS = 300
 const POINT_MS = 460
 const POINT_HOLD_MS = 700
+/** Escort guests one by one up to this many moves; beyond it, stage table by table. */
+const ESCORT_MAX = 4
+/** Rough ceiling for a staged multi-table performance. */
+const STAGED_TOTAL_MS = 14000
 
 // ---- performance queue ------------------------------------------------------
 
@@ -57,24 +63,51 @@ function reducedMotion(): boolean {
 // own CSS choreography still tells the story when the user tabs back.
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) queue.length = 0
+    if (document.hidden) {
+      for (const p of queue) p.done?.()
+      queue.length = 0
+    }
   })
 }
 
-export function enqueuePerformance(p: CursorPerformance): void {
-  if (reducedMotion() || p.steps.length === 0) return
-  if (typeof document !== 'undefined' && document.hidden) return
-  queue.push(p)
-  // A backlog means the agent is hammering tools; keep only the freshest acts.
-  while (queue.length > 4) {
-    const i = queue.findIndex((q) => !q.synced)
-    queue.splice(i === -1 ? 0 : i, 1)
-  }
-  wake?.()
+function perfDuration(p: CursorPerformance): number {
+  return p.steps.reduce((ms, s) => ms + (s.stay ? 0 : s.durationMs ?? 420) + (s.holdMs ?? 0), 0)
+}
+
+// Estimated end of the performance currently on stage, for backlog math.
+let playingUntil = 0
+
+/**
+ * Milliseconds of cursor work already committed (queued plus what remains of
+ * the current act). Chip delays are set relative to now, so choreography adds
+ * this lead to keep chips from leaving before the cursor can get to them.
+ */
+export function estimatedBacklogMs(): number {
+  const queued = queue.reduce((ms, p) => ms + perfDuration(p), 0)
+  return queued + (playing ? Math.max(0, playingUntil - Date.now()) : 0)
+}
+
+/** Resolves when the performance has played — or immediately if it can't. */
+export function enqueuePerformance(p: CursorPerformance): Promise<void> {
+  if (reducedMotion() || p.steps.length === 0) return Promise.resolve()
+  if (typeof document !== 'undefined' && document.hidden) return Promise.resolve()
+  return new Promise((resolve) => {
+    p.done = resolve
+    queue.push(p)
+    // A backlog means the agent is hammering tools; keep only the freshest acts.
+    while (queue.length > 4) {
+      const i = queue.findIndex((q) => !q.synced)
+      const [dropped] = queue.splice(i === -1 ? 0 : i, 1)
+      dropped.done?.()
+    }
+    wake?.()
+  })
 }
 
 export function nextPerformance(): CursorPerformance | undefined {
-  return queue.shift()
+  const p = queue.shift()
+  if (p) playingUntil = Date.now() + perfDuration(p)
+  return p
 }
 
 export function queuedCount(): number {
@@ -149,6 +182,8 @@ function placeCenter(state: AisleState, id: string): { x: number; y: number; lab
  * Build and enqueue the cursor performance for one mutating tool call.
  * `touched` is the tool's own list of affected ids; guest moves are derived
  * from the seating diff so side effects (bumped guests, cleared rooms) count.
+ * Resolves once the performance has fully played, so tool handlers can hold
+ * their reply until the human has seen the change happen.
  */
 export function choreograph(opts: {
   tool: string
@@ -156,8 +191,8 @@ export function choreograph(opts: {
   before: AisleState
   after: AisleState
   touched: string[]
-}): void {
-  if (reducedMotion() || (typeof document !== 'undefined' && document.hidden)) return
+}): Promise<void> {
+  if (reducedMotion() || (typeof document !== 'undefined' && document.hidden)) return Promise.resolve()
   const { before, after, touched } = opts
   const summary = clip(opts.summary)
   const posBefore = chipPositions(before)
@@ -171,12 +206,15 @@ export function choreograph(opts: {
 
   const steps: CursorStep[] = []
   const visitedTables = new Set<string>()
+  const waits: Promise<void>[] = []
+  // Chip delays are relative to now; if the cursor is mid-act, push them out.
+  const lead = estimatedBacklogMs()
   let escorted = false
 
-  if (moved.length > 0 && moved.length <= 2 && !cursorBusy()) {
+  if (moved.length > 0 && moved.length <= ESCORT_MAX) {
     escorted = true
     // Pick each guest up and carry them to their seat, chip in tow.
-    let t = 0
+    let t = lead
     for (const id of moved) {
       const from = posBefore[id]
       const to = posAfter[id]
@@ -203,37 +241,43 @@ export function choreograph(opts: {
       t += CARRY_MS + DROP_HOLD_MS
       if (after.seating[id]) visitedTables.add(after.seating[id].tableId)
     }
-    enqueuePerformance({ steps, synced: true })
-  } else if (moved.length > 2) {
+    waits.push(enqueuePerformance({ steps, synced: true }))
+  } else if (moved.length > ESCORT_MAX) {
     escorted = true
-    // Too many to escort one by one — sweep across the destinations like a
-    // conductor while the chips' own staggered glide plays underneath.
-    const destTables = [...new Set(moved.map((id) => after.seating[id]?.tableId).filter(Boolean))] as string[]
-    const stops = destTables.slice(0, 3).map((tid) => after.tables[tid]).filter(Boolean)
-    if (stops.length === 0) {
-      // Everyone headed to the lounge.
-      steps.push({
-        x: TRAY.x + TRAY.w / 2,
-        y: TRAY.y + TRAY.h / 2,
-        label: summary,
-        gesture: 'point',
-        durationMs: POINT_MS,
-        holdMs: POINT_HOLD_MS,
-      })
-    } else {
-      stops.forEach((table, i) => {
-        steps.push({
-          x: table.x,
-          y: table.y,
-          label: i === 0 ? summary : undefined,
-          gesture: 'point',
-          durationMs: i === 0 ? POINT_MS : 520,
-          holdMs: i === stops.length - 1 ? POINT_HOLD_MS : 260,
-        })
-        visitedTables.add(table.id)
-      })
+    // Too many to carry one by one — walk the room table by table instead.
+    // The cursor stops at each destination and that table's chips lift off as
+    // it arrives, so the human watches the arrangement assemble in order.
+    const groups: { x: number; y: number; label: string; ids: string[] }[] = []
+    for (const tid of after.tableOrder) {
+      const table = after.tables[tid]
+      const ids = moved.filter((id) => after.seating[id]?.tableId === tid)
+      if (!table || ids.length === 0) continue
+      groups.push({ x: table.x, y: table.y, label: `Seating ${table.name}`, ids })
+      visitedTables.add(tid)
     }
-    enqueuePerformance({ steps })
+    const toLounge = moved.filter((id) => !after.seating[id])
+    if (toLounge.length) {
+      groups.push({ x: TRAY.x + TRAY.w / 2, y: TRAY.y - 26, label: 'Back to the lounge', ids: toLounge })
+    }
+    const perStop = Math.min(1500, Math.max(700, STAGED_TOTAL_MS / groups.length))
+    const fly = Math.round(perStop * 0.45)
+    const hold = Math.round(perStop * 0.55)
+    let t = lead
+    for (const g of groups) {
+      steps.push({
+        x: g.x,
+        y: g.y,
+        label: `${g.label} · ${g.ids.length}`,
+        gesture: 'point',
+        durationMs: fly,
+        holdMs: hold,
+      })
+      t += fly
+      const stagger = Math.min(90, Math.round(hold / g.ids.length))
+      g.ids.forEach((id, j) => setChipDelay(id, t + j * stagger))
+      t += hold
+    }
+    waits.push(enqueuePerformance({ steps, synced: true }))
   }
 
   // Remaining touched things: new guests in the lounge, tables, venue
@@ -259,9 +303,11 @@ export function choreograph(opts: {
     if (extra.length > 0) {
       extra[0].label = summary
       extra[extra.length - 1].holdMs = POINT_HOLD_MS
-      enqueuePerformance({ steps: extra })
+      waits.push(enqueuePerformance({ steps: extra }))
     }
   }
+
+  return Promise.all(waits).then(() => undefined)
 }
 
 /** A label-only beat where the cursor already is — used for read-only tools. */

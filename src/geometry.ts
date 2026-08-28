@@ -191,6 +191,43 @@ export function boundsOverlap(a: Bounds, b: Bounds, inset = 2): boolean {
   return a.left + inset < b.right && a.right - inset > b.left && a.top + inset < b.bottom && a.bottom - inset > b.top
 }
 
+export interface LayoutConflict {
+  aKind: 'table' | 'feature'
+  aId: string
+  aLabel: string
+  bKind: 'table' | 'feature'
+  bId: string
+  bLabel: string
+}
+
+/**
+ * Every pair of overlapping furniture pieces — table×table, table×amenity,
+ * amenity×amenity (hidden amenities exempt). The canvas badges these and the
+ * agent tools report them, from this single source of truth.
+ */
+export function layoutConflicts(state: AisleState): LayoutConflict[] {
+  const out: LayoutConflict[] = []
+  const tables = state.tableOrder.map((id) => state.tables[id])
+  const features = Object.values(state.venue).filter((feature) => feature.enabled)
+  for (let i = 0; i < tables.length; i++) {
+    for (let j = i + 1; j < tables.length; j++) {
+      if (!boundsOverlap(tableBounds(tables[i], state.venueDimensions), tableBounds(tables[j], state.venueDimensions))) continue
+      out.push({ aKind: 'table', aId: tables[i].id, aLabel: tables[i].name, bKind: 'table', bId: tables[j].id, bLabel: tables[j].name })
+    }
+    for (const feature of features) {
+      if (!boundsOverlap(tableBounds(tables[i], state.venueDimensions), featureBounds(feature))) continue
+      out.push({ aKind: 'table', aId: tables[i].id, aLabel: tables[i].name, bKind: 'feature', bId: feature.id, bLabel: feature.label })
+    }
+  }
+  for (let i = 0; i < features.length; i++) {
+    for (let j = i + 1; j < features.length; j++) {
+      if (!boundsOverlap(featureBounds(features[i]), featureBounds(features[j]))) continue
+      out.push({ aKind: 'feature', aId: features[i].id, aLabel: features[i].label, bKind: 'feature', bId: features[j].id, bLabel: features[j].label })
+    }
+  }
+  return out
+}
+
 /** Footprint radius used for collision checks and drop targets. */
 export function tableFootprint(table: Table, dimensions: VenueDimensions = DEFAULT_VENUE_DIMENSIONS): number {
   if (table.shape === 'round') return tableRadius(table, dimensions) + CHIP_R * 2 + 10

@@ -9,7 +9,9 @@ import {
   type CursorStep,
 } from '../agentCursor'
 
-const IDLE_FADE_MS = 3000
+// Long enough that the cursor stays on stage across an agent's think-act
+// rhythm instead of vanishing between consecutive tool calls.
+const IDLE_FADE_MS = 6000
 const EASE_TRAVEL: [number, number, number, number] = [0.3, 0.7, 0.35, 1]
 
 function sleep(ms: number): Promise<void> {
@@ -69,7 +71,10 @@ export function AgentCursor() {
       let perf
       while (aliveRef.current && (perf = nextPerformance())) {
         const hidden = scale.get() < 0.05
-        if (perf.onlyIfVisible && hidden) continue
+        if (perf.onlyIfVisible && hidden) {
+          perf.done?.()
+          continue
+        }
         if (hidden) {
           // Materialize a short hop away from the first stop and glide in.
           const first = perf.steps[0]
@@ -85,6 +90,8 @@ export function AgentCursor() {
           if (!aliveRef.current) break
           await playStep(step, rush)
         }
+        // Frees any tool call holding its reply until this act finished.
+        perf.done?.()
       }
       setCarrying(false)
       setCursorPlaying(false)

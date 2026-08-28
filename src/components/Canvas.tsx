@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import { useStore } from '../store'
@@ -7,20 +7,19 @@ import {
   CHIP_R,
   STAGE_H,
   STAGE_W,
-  boundsOverlap,
   chipPositions,
   dist,
   featureBounds,
   featureMinSize,
   feetSize,
   formatFeet,
+  layoutConflicts,
   rectTableSize,
   roomRect,
   seatPos,
   snapStageValue,
   stageUnitsPerFoot,
   tableBodyBounds,
-  tableBounds,
   tableFootprint,
   tableRadius,
 } from '../geometry'
@@ -83,6 +82,8 @@ function Chip(props: {
   layout: 'stage' | 'flow'
   x?: number
   y?: number
+  /** Stage position to fly in from on mount — set when a chip leaves the lounge for a seat, so it glides instead of teleporting. */
+  spawnFrom?: { x: number; y: number }
   color: string
   dragging: boolean
   selected: boolean
@@ -98,13 +99,23 @@ function Chip(props: {
   // CSS animations. No JS timers: fill-mode ends them, so nothing can stick.
   const flashing = touchedAt !== undefined && Date.now() - touchedAt < 4000
 
+  // A chip promoted from the lounge mounts fresh on the stage, so its transform
+  // transition has no "from". Render one flushed layout at spawnFrom, then move
+  // to the real seat — the transition (and any escort delay) carries it in.
+  const [spawnPos, setSpawnPos] = useState(layout === 'stage' ? props.spawnFrom ?? null : null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (!spawnPos || !rootRef.current) return
+    rootRef.current.getBoundingClientRect()
+    setSpawnPos(null)
+  }, [spawnPos])
+
   // The lounge's chip row scrolls, and a CSS-positioned nametag popping up
   // above a chip near the top of that scroll area gets clipped by it. Flow
   // chips instead portal their nametag to the body, placed from a measured
   // rect, so it always floats free above everything.
   const isFlow = layout === 'flow'
   const [flowHovered, setFlowHovered] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
   const [tagPos, setTagPos] = useState<{ left: number; top: number } | null>(null)
   const showFlowTag = isFlow && (flowHovered || selected)
 
@@ -132,7 +143,7 @@ function Chip(props: {
       ref={rootRef}
       className={cls}
       style={{
-        transform: layout === 'stage' ? `translate(${x}px, ${y}px)` : undefined,
+        transform: layout === 'stage' ? `translate(${spawnPos?.x ?? x}px, ${spawnPos?.y ?? y}px)` : undefined,
         ['--group' as string]: color,
         transitionDelay: dragging ? '0ms' : `${staggerMs}ms`,
       }}
@@ -303,6 +314,14 @@ export function Canvas() {
     [s.guests, s.guestOrder, s.seating, s.tables, s.venueDimensions],
   )
 
+  // Last committed chip world: lets a chip that just left the lounge fly in
+  // from where it stood (the tray anchor, just below the room's bottom edge)
+  // instead of materializing at its seat.
+  const prevChips = useRef<{ positions: Record<string, { x: number; y: number }>; seating: typeof s.seating } | null>(null)
+  useEffect(() => {
+    prevChips.current = { positions, seating: s.seating }
+  })
+
   const unseatedCount = unseatedAttending.length
   const room = roomRect(s.venueDimensions)
   const unitsPerFoot = stageUnitsPerFoot(s.venueDimensions)
@@ -310,26 +329,9 @@ export function Canvas() {
   const collisions = useMemo(() => {
     const map = new Map<string, string[]>()
     const add = (key: string, label: string) => map.set(key, [...(map.get(key) ?? []), label])
-    const tables = s.tableOrder.map((id) => s.tables[id])
-    const features = Object.values(s.venue).filter((feature) => feature.enabled)
-    for (let i = 0; i < tables.length; i++) {
-      for (let j = i + 1; j < tables.length; j++) {
-        if (!boundsOverlap(tableBounds(tables[i], s.venueDimensions), tableBounds(tables[j], s.venueDimensions))) continue
-        add(layoutKey('table', tables[i].id), tables[j].name)
-        add(layoutKey('table', tables[j].id), tables[i].name)
-      }
-      for (const feature of features) {
-        if (!boundsOverlap(tableBounds(tables[i], s.venueDimensions), featureBounds(feature))) continue
-        add(layoutKey('table', tables[i].id), feature.label)
-        add(layoutKey('feature', feature.id), tables[i].name)
-      }
-    }
-    for (let i = 0; i < features.length; i++) {
-      for (let j = i + 1; j < features.length; j++) {
-        if (!boundsOverlap(featureBounds(features[i]), featureBounds(features[j]))) continue
-        add(layoutKey('feature', features[i].id), features[j].label)
-        add(layoutKey('feature', features[j].id), features[i].label)
-      }
+    for (const c of layoutConflicts(s)) {
+      add(layoutKey(c.aKind, c.aId), c.bLabel)
+      add(layoutKey(c.bKind, c.bId), c.aLabel)
     }
     return map
   }, [s.tableOrder, s.tables, s.venue, s.venueDimensions])
@@ -818,6 +820,8 @@ export function Canvas() {
           // The agent cursor may be flying over to pick this chip up — hold the
           // chip's departure until the cursor gets there.
           const escortDelay = agentChipDelay(id)
+          const prev = prevChips.current
+          const spawnFrom = prev && !prev.seating[id] ? prev.positions[id] : undefined
           return (
             <Chip
               key={id}
@@ -825,6 +829,7 @@ export function Canvas() {
               layout="stage"
               x={p.x}
               y={p.y}
+              spawnFrom={spawnFrom}
               color={colors[g.group]}
               dragging={false}
               selected={s.selection?.kind === 'guest' && s.selection.id === id}
