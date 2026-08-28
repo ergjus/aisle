@@ -1,19 +1,20 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import { ChevronRight } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { ChevronRight, Plus } from 'lucide-react'
 import { useStore } from '../store'
 import { groupColors, parseGuestEntries } from '../utils'
 import { constraintStatus, constraintText } from '../constraints'
-import type { ZoneId } from '../types'
+import { feetSize, formatFeet } from '../geometry'
+import type { VenueFeatureId, ZoneId } from '../types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Separator } from '@/components/ui/separator'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
@@ -40,32 +41,340 @@ function usePersistedOpen(key: string, fallback: boolean) {
   return [open, set] as const
 }
 
+/** Persists a small JSON blob to localStorage, merged over `fallback` so new keys added later still get a default. */
+function usePersistedJSON<T extends Record<string, unknown>>(key: string, fallback: T) {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key)
+      return raw ? { ...fallback, ...JSON.parse(raw) } : fallback
+    } catch {
+      return fallback
+    }
+  })
+  const set = (v: T) => {
+    setValue(v)
+    try {
+      localStorage.setItem(key, JSON.stringify(v))
+    } catch {
+      // Preference simply won't stick.
+    }
+  }
+  return [value, set] as const
+}
+
+type SectionId = 'venue' | 'guests' | 'activity' | 'rules'
+
+/** Starting share of the sidebar's leftover height for each section, and the floor it can't be dragged below. */
+const DEFAULT_WEIGHTS: Record<SectionId, number> = { venue: 230, guests: 300, activity: 180, rules: 180 }
+const MIN_HEIGHTS: Record<SectionId, number> = { venue: 190, guests: 160, activity: 110, rules: 110 }
+
 function Section(props: {
-  id: string
+  id: SectionId
   title: string
   count?: ReactNode
   /** Shown in the header row only while the section is collapsed. */
   closedExtra?: ReactNode
-  defaultOpen: boolean
+  /** Shown at the end of the header row only while the section is open — a real button, sitting outside the collapse trigger. */
+  headerAction?: ReactNode
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  /** Height this section never shrinks below, so it can't be squeezed away. */
+  minHeight: number
+  /** Its share of the leftover height, relative to the other open sections — drag the handle below a section to change it. */
+  weight: number
   children: ReactNode
 }) {
-  const [open, setOpen] = usePersistedOpen(`aisle:sec:${props.id}`, props.defaultOpen)
+  const { open } = props
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="border-b border-hairline/70 pb-1.5 last:border-0">
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md px-1.5 py-2 text-left text-[11.5px] font-bold tracking-[0.12em] text-ink-soft uppercase hover:bg-parchment">
-        <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden="true" />
-        {props.title}
-        {props.count !== undefined && (
-          <span className="text-[11px] tracking-wide text-ink-faint">{props.count}</span>
-        )}
-        {!open && props.closedExtra}
-      </CollapsibleTrigger>
-      <CollapsibleContent className="px-1 pt-1 pb-2">{props.children}</CollapsibleContent>
+    <Collapsible
+      open={open}
+      onOpenChange={props.onOpenChange}
+      className={cn(
+        'flex flex-col',
+        // Open sections split the leftover height by weight (basis-0) and never
+        // fall below minHeight, so each one scrolls inside itself instead of
+        // pushing the sections below it off the bottom. No max-content cap: the
+        // whole point of the drag handle is letting the weight win even when a
+        // section's own content is short. Collapsed ones stay put.
+        open ? 'min-h-0 basis-0 shrink' : 'flex-none',
+      )}
+      style={open ? { minHeight: props.minHeight, flexGrow: props.weight } : undefined}
+    >
+      <div className="flex w-full shrink-0 items-center gap-1">
+        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-2 text-left text-[11.5px] font-bold tracking-[0.12em] text-ink-soft uppercase hover:bg-accent">
+          <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden="true" />
+          {props.title}
+          {props.count !== undefined && (
+            <span className="text-[11px] tracking-wide text-ink-faint">{props.count}</span>
+          )}
+          {!open && props.closedExtra}
+        </CollapsibleTrigger>
+        {open && props.headerAction}
+      </div>
+      <CollapsibleContent className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-2 data-open:block">
+        {props.children}
+      </CollapsibleContent>
     </Collapsible>
   )
 }
 
+/** Drag handle between two sections — only live when both are open, since a collapsed section has nothing to give up. */
+function ResizeHandle(props: {
+  above: SectionId
+  below: SectionId
+  active: boolean
+  weights: Record<SectionId, number>
+  setWeights: (w: Record<SectionId, number>) => void
+}) {
+  const { above, below, active, weights, setWeights } = props
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (!active) return
+    e.preventDefault()
+    const startY = e.clientY
+    const startAbove = weights[above]
+    const startBelow = weights[below]
+    const onMove = (ev: PointerEvent) => {
+      const dy = ev.clientY - startY
+      setWeights({
+        ...weights,
+        [above]: Math.max(30, startAbove + dy),
+        [below]: Math.max(30, startBelow - dy),
+      })
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+  return (
+    <div
+      className={cn('group relative z-10 -my-1.5 h-3 shrink-0 touch-none', active ? 'cursor-row-resize' : 'cursor-default')}
+      onPointerDown={onPointerDown}
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label={`Resize ${above} / ${below}`}
+    >
+      {active && (
+        <div className="absolute inset-x-2 top-1/2 h-px -translate-y-1/2 rounded-full bg-hairline transition-colors group-hover:bg-gold" />
+      )}
+    </div>
+  )
+}
+
+// ---- venue -----------------------------------------------------------------
+
+const VENUE_FEATURES: { id: VenueFeatureId; glyph: string }[] = [
+  { id: 'entrance', glyph: '↳' },
+  { id: 'dance_floor', glyph: '✦' },
+  { id: 'band', glyph: '♪' },
+  { id: 'bathroom', glyph: 'WC' },
+  { id: 'photo_booth', glyph: '▣' },
+  { id: 'bar', glyph: '◒' },
+  { id: 'buffet', glyph: '≋' },
+  { id: 'cake_table', glyph: '♢' },
+  { id: 'gift_table', glyph: '♥' },
+]
+
+function DimensionInput(props: { label: string; value: number; min: number; max: number; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(props.value))
+  useEffect(() => setDraft(String(props.value)), [props.value])
+  useEffect(() => {
+    const value = Number(draft)
+    if (!Number.isFinite(value) || value === props.value) return
+    const timer = window.setTimeout(() => props.onCommit(value), 320)
+    return () => window.clearTimeout(timer)
+  }, [draft, props.value, props.onCommit])
+
+  const commit = () => {
+    const value = Number(draft)
+    if (Number.isFinite(value)) props.onCommit(value)
+    else setDraft(String(props.value))
+  }
+
+  return (
+    <label className="text-[9.5px] font-semibold tracking-wide text-ink-soft uppercase">
+      {props.label}
+      <Input
+        className="mt-1 h-7 bg-ivory px-2 text-[11px]"
+        type="number"
+        min={props.min}
+        max={props.max}
+        step={0.5}
+        value={draft}
+        onChange={(event) => setDraft(event.currentTarget.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur()
+        }}
+      />
+    </label>
+  )
+}
+
+function VenueSection() {
+  const s = useStore()
+
+  return (
+    <div className="space-y-2 pt-1">
+      <div className="rounded-lg border border-hairline bg-parchment/45 p-2">
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <span className="text-[10px] font-bold tracking-[0.13em] text-ink-soft uppercase">Room size</span>
+          <span className="text-[10px] text-ink-faint">
+            {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <DimensionInput label="Width (ft)" value={s.venueDimensions.widthFt} min={20} max={300} onCommit={(value) => s.updateVenueDimensions({ widthFt: value })} />
+          <DimensionInput label="Length (ft)" value={s.venueDimensions.lengthFt} min={15} max={200} onCommit={(value) => s.updateVenueDimensions({ lengthFt: value })} />
+        </div>
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <label className="text-[9.5px] font-semibold tracking-wide text-ink-soft uppercase" htmlFor="venue-snap">
+            Snap grid
+          </label>
+          <Select
+            value={String(s.venueDimensions.snapFt)}
+            onValueChange={(value) => s.updateVenueDimensions({ snapFt: Number(value) })}
+          >
+            <SelectTrigger id="venue-snap" className="h-7 w-[92px] bg-ivory px-2 text-[10.5px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0">Off</SelectItem>
+              <SelectItem value="0.5">6 inches</SelectItem>
+              <SelectItem value="1">1 foot</SelectItem>
+              <SelectItem value="2">2 feet</SelectItem>
+              <SelectItem value="5">5 feet</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <p className="px-1 text-[10.5px] leading-snug text-ink-soft">
+        Room changes keep furniture true to scale. Alt moves freely · Shift-click selects a group.
+      </p>
+
+      <div className="grid grid-cols-1 gap-1">
+        {VENUE_FEATURES.map(({ id, glyph }) => {
+          const feature = s.venue[id]
+          const dimensions = feetSize(feature.w, feature.h, s.venueDimensions)
+          return (
+            <div key={id} className="flex items-center gap-2 rounded-md border bg-parchment/55 px-2 py-1.5">
+              <span
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-pine-900 text-[10px] font-bold text-gold-bright"
+                aria-hidden="true"
+              >
+                {glyph}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[11.5px] font-semibold">{feature.label}</span>
+                {feature.enabled && (
+                  <span className="block truncate text-[9.5px] text-ink-faint">
+                    {formatFeet(dimensions.w)} × {formatFeet(dimensions.h)} · {Math.round(feature.rotation)}°
+                  </span>
+                )}
+              </span>
+              <Button
+                variant={feature.enabled ? 'outline' : 'ghost'}
+                size="xs"
+                aria-pressed={feature.enabled}
+                aria-label={`${feature.enabled ? 'Hide' : 'Show'} ${feature.label}`}
+                onClick={() => {
+                  s.updateVenueFeature(id, { enabled: !feature.enabled })
+                  s.logActivity('venue', `${feature.enabled ? 'Hid' : 'Added'} ${feature.label}.`, 'you')
+                }}
+              >
+                {feature.enabled ? 'Shown' : 'Add'}
+              </Button>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ---- guests ----------------------------------------------------------------
+
+function GroupBlock(props: {
+  name: string
+  color: string
+  ids: string[]
+  seatedTotal: number
+  attendingTotal: number
+  removable: boolean
+  children: ReactNode
+}) {
+  const s = useStore()
+  const [open, setOpen] = usePersistedOpen(`aisle:group:${props.name}`, true)
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="mb-1">
+      <div className="group mt-2 mb-0.5 flex items-center gap-1.5 px-1">
+        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-0.5 text-left text-[11px] font-bold tracking-[0.12em] text-ink-soft uppercase hover:bg-parchment">
+          <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden="true" />
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: props.color }} />
+          <span className="truncate">{props.name}</span>
+          <span className="ml-auto shrink-0 tracking-normal">
+            {props.seatedTotal}/{props.attendingTotal}
+          </span>
+        </CollapsibleTrigger>
+        {props.removable && (
+          <button
+            className="shrink-0 px-1 text-[13px] leading-none text-ink-faint opacity-0 group-hover:opacity-100 hover:text-brick"
+            title={`Remove empty group "${props.name}"`}
+            aria-label={`Remove empty group ${props.name}`}
+            onClick={() => {
+              s.logActivity('remove group', `Removed empty group "${props.name}".`, 'you')
+              s.removeGroup(props.name)
+            }}
+          >
+            ×
+          </button>
+        )}
+      </div>
+      <CollapsibleContent>{props.children}</CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/**
+ * The one place a group gets named — opened either from the composer's group
+ * picker or from the “New group” row at the foot of the list.
+ */
+function NewGroupRow(props: { onCreated?: (name: string) => void; onClose: () => void }) {
+  const s = useStore()
+  const [name, setName] = useState('')
+  const submit = () => {
+    const added = s.addGroup(name)
+    if (!added) return
+    s.logActivity('add group', `Added group "${added}".`, 'you')
+    props.onCreated?.(added)
+    props.onClose()
+  }
+  return (
+    <div className="flex gap-1.5">
+      <Input
+        autoFocus
+        placeholder="New group name…"
+        aria-label="New group name"
+        className="min-w-0 flex-1"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') submit()
+          if (e.key === 'Escape') props.onClose()
+        }}
+      />
+      <Button variant="outline" size="sm" onClick={submit} disabled={!name.trim()}>
+        Create
+      </Button>
+      <Button variant="ghost" size="icon-sm" aria-label="Cancel new group" onClick={props.onClose}>
+        ×
+      </Button>
+    </div>
+  )
+}
 
 function GuestsSection() {
   const s = useStore()
@@ -74,26 +383,43 @@ function GuestsSection() {
   const [group, setGroup] = useState('')
   const [showImport, setShowImport] = useState(false)
   const [importText, setImportText] = useState('')
+  const [showNewGroup, setShowNewGroup] = useState(false)
+  const [showListGroup, setShowListGroup] = useState(false)
 
-  const colors = useMemo(() => groupColors(s), [s.guests, s.guestOrder])
+  const NEW_GROUP = '__new_group__'
+
+  const colors = useMemo(() => groupColors(s), [s.guests, s.guestOrder, s.groupOrder])
 
   const grouped = useMemo(() => {
     const q = query.trim().toLowerCase()
     const out = new Map<string, string[]>()
+    for (const grp of s.groupOrder) out.set(grp, [])
     for (const id of s.guestOrder) {
       const g = s.guests[id]
-      if (q && !g.name.toLowerCase().includes(q) && !g.group.toLowerCase().includes(q)) continue
       if (!out.has(g.group)) out.set(g.group, [])
       out.get(g.group)!.push(id)
     }
-    return out
-  }, [s.guests, s.guestOrder, query])
+    if (!q) return out
+    const filtered = new Map<string, string[]>()
+    for (const [grp, ids] of out) {
+      if (grp.toLowerCase().includes(q)) {
+        filtered.set(grp, ids)
+        continue
+      }
+      const matches = ids.filter((id) => s.guests[id].name.toLowerCase().includes(q))
+      if (matches.length > 0) filtered.set(grp, matches)
+    }
+    return filtered
+  }, [s.guests, s.guestOrder, s.groupOrder, query])
 
-  const groups = [...new Set(s.guestOrder.map((id) => s.guests[id].group))]
+  // A brand-new chart has no groups yet, so offer the default the store uses.
+  const groupChoices = s.groupOrder.length > 0 ? s.groupOrder : ['Guests']
+  // Survives the chosen group being renamed or removed out from under us.
+  const activeGroup = groupChoices.includes(group) ? group : groupChoices[0]
 
   const submitGuest = () => {
     if (!name.trim()) return
-    const guest = s.addGuest({ name: name.trim(), group: group.trim() || undefined })
+    const guest = s.addGuest({ name: name.trim(), group: activeGroup })
     s.logActivity('add guest', `Added ${guest.name} (${guest.group}).`, 'you')
     setName('')
   }
@@ -113,34 +439,54 @@ function GuestsSection() {
 
   return (
     <>
-      <div className="flex flex-col gap-1.5 rounded-xl border bg-card p-2.5">
-        <Input
-          placeholder="Add a guest…"
-          aria-label="Guest name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submitGuest()}
-        />
+      {/* Pinned: the composer and the search box stay put while the list under
+          them scrolls. Kept compact so the list still gets most of the room. */}
+      <div className="sticky top-0 z-10 -mx-1 mb-1 bg-ivory px-1 pt-1 pb-2">
+      <div className="flex flex-col gap-1.5 rounded-lg border bg-parchment/70 p-2">
         <div className="flex gap-1.5">
           <Input
-            placeholder="Group (e.g. College friends)…"
-            aria-label="Guest group"
+            placeholder="Add a guest…"
+            aria-label="Guest name"
             className="min-w-0 flex-1"
-            value={group}
-            onChange={(e) => setGroup(e.target.value)}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submitGuest()}
-            list="group-options"
           />
-          <datalist id="group-options">
-            {groups.map((g) => (
-              <option key={g} value={g} />
-            ))}
-          </datalist>
           <Button variant="outline" size="sm" onClick={submitGuest} disabled={!name.trim()}>
             Add
           </Button>
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setShowImport((v) => !v)}>
+        {/* The group belongs to the guest you're adding, so it rides along in
+            the same card — and creating one happens right here, in place. */}
+        <div className="flex items-center gap-1.5">
+          <span className="shrink-0 pl-0.5 text-[10.5px] font-bold tracking-[0.1em] text-ink-soft uppercase">
+            Group
+          </span>
+          <Select
+            value={activeGroup}
+            onValueChange={(v) => {
+              if (v === NEW_GROUP) setShowNewGroup(true)
+              else if (v) setGroup(v)
+            }}
+          >
+            <SelectTrigger className="min-w-0 flex-1" size="sm" aria-label="Group for the new guest">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {groupChoices.map((g) => (
+                <SelectItem key={g} value={g}>
+                  {g}
+                </SelectItem>
+              ))}
+              <SelectSeparator />
+              <SelectItem value={NEW_GROUP}>＋ New group…</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {showNewGroup && (
+          <NewGroupRow onCreated={(g) => setGroup(g)} onClose={() => setShowNewGroup(false)} />
+        )}
+        <Button variant="ghost" size="xs" onClick={() => setShowImport((v) => !v)}>
           {showImport ? 'Hide Paste Box' : 'Paste a List…'}
         </Button>
         {showImport && (
@@ -158,28 +504,33 @@ function GuestsSection() {
         )}
       </div>
       <Input
-        className="my-2"
+        className="mt-1.5"
         placeholder="Search guests…"
         aria-label="Search guests"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
+      </div>
       {[...grouped.entries()].map(([groupName, ids]) => (
-        <div key={groupName} className="mb-1">
-          <div className="mt-2 mb-0.5 flex items-center gap-2 px-1 text-[11px] font-bold tracking-[0.12em] text-ink-soft uppercase">
-            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: colors[groupName] }} />
-            <span className="truncate">{groupName}</span>
-            <span className="ml-auto tracking-normal">
-              {ids.filter((id) => s.seating[id]).length}/{ids.filter((id) => s.guests[id].rsvp !== 'no').length}
-            </span>
-          </div>
+        <GroupBlock
+          key={groupName}
+          name={groupName}
+          color={colors[groupName]}
+          ids={ids}
+          seatedTotal={ids.filter((id) => s.seating[id]).length}
+          attendingTotal={ids.filter((id) => s.guests[id].rsvp !== 'no').length}
+          removable={ids.length === 0}
+        >
+          {ids.length === 0 && (
+            <p className="px-1 pb-1 text-[11.5px] text-ink-faint italic">No guests yet.</p>
+          )}
           {ids.map((id) => {
             const g = s.guests[id]
             const seat = s.seating[id]
             return (
               <button
                 key={id}
-                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-parchment"
+                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-accent"
                 onClick={(e) => s.setSelection({ kind: 'guest', id, at: { x: e.clientX + 12, y: e.clientY - 10 } })}
               >
                 <span
@@ -191,12 +542,12 @@ function GuestsSection() {
                   {g.name}
                 </span>
                 {g.rsvp === 'pending' && (
-                  <span className="rounded-full bg-[#efe3bc] px-1.5 text-[10px] font-bold whitespace-nowrap text-[#8a6d1f]">
+                  <span className="rounded-full bg-secondary px-1.5 text-[10px] font-bold whitespace-nowrap text-ink-soft">
                     rsvp?
                   </span>
                 )}
                 {g.dietary.length > 0 && (
-                  <span className="rounded-full bg-[#e2e8d9] px-1.5 text-[10px] font-bold whitespace-nowrap text-sage">
+                  <span className="rounded-full bg-sage/15 px-1.5 text-[10px] font-bold whitespace-nowrap text-sage">
                     {g.dietary[0].split(' ')[0]}
                   </span>
                 )}
@@ -208,8 +559,24 @@ function GuestsSection() {
               </button>
             )
           })}
-        </div>
+        </GroupBlock>
       ))}
+      {/* A group can also be started from where you're actually looking at
+          them — the foot of the list, in place, no dialog. */}
+      {!query.trim() &&
+        (showListGroup ? (
+          <div className="mt-2 px-1">
+            <NewGroupRow onClose={() => setShowListGroup(false)} />
+          </div>
+        ) : (
+          <button
+            className="mt-2 flex w-full items-center gap-2 rounded-md border border-dashed border-hairline px-2 py-1.5 text-[11px] font-bold tracking-[0.12em] text-ink-soft uppercase hover:border-sage hover:bg-accent hover:text-primary"
+            onClick={() => setShowListGroup(true)}
+          >
+            <Plus className="h-3 w-3 shrink-0" aria-hidden="true" />
+            New group
+          </button>
+        ))}
       {s.guestOrder.length === 0 && (
         <p className="my-1.5 px-1 text-[12.5px] text-ink-soft">
           The list is empty. Add guests above, paste a list, or press <b>Load Sample Wedding</b> to see Aisle at work.
@@ -238,19 +605,19 @@ function ActivitySection() {
           Every step lands here — yours and your agent's. Seat someone, or ask your agent to arrange the room.
         </p>
       )}
-      <div className="flex max-h-[46vh] flex-col gap-2 overflow-y-auto overscroll-contain pr-0.5">
+      <div className="flex flex-col gap-2 pr-0.5">
         {s.agentLog.map((e) => (
           <div
             key={e.id}
             className={cn(
-              'animate-in fade-in slide-in-from-top-1 rounded-lg border border-l-[3px] bg-card px-2.5 py-1.5',
+              'animate-in fade-in slide-in-from-top-1 rounded-md border border-l-[3px] bg-parchment/70 px-2.5 py-1.5',
               e.source === 'you' ? 'border-l-ink-faint' : 'border-l-gold',
             )}
           >
             <div
               className={cn(
                 'text-[10.5px] font-bold tracking-[0.1em] uppercase',
-                e.source === 'you' ? 'text-ink-soft' : 'text-[#9c8446]',
+                e.source === 'you' ? 'text-ink-soft' : 'text-gold-ink',
               )}
             >
               {e.source === 'you' ? 'You' : 'Agent'} · {e.tool}
@@ -325,7 +692,7 @@ function AddRule() {
   }
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-xl border bg-card p-2.5">
+    <div className="flex flex-col gap-1.5 rounded-lg border bg-parchment/70 p-2">
       <Select value={type} onValueChange={(v) => v !== null && setType(v)}>
         <SelectTrigger className="w-full" size="sm" aria-label="Kind of rule">
           <SelectValue />
@@ -356,23 +723,28 @@ function RulesSection() {
 
   return (
     <>
-      {s.constraints.length > 0 && (
-        <p className="my-1 px-1 text-xs font-bold">
-          <span className="text-sage">{counts.ok} kept</span>
-          {counts.violated > 0 && <span className="text-brick"> · {counts.violated} broken</span>}
-          {counts.pending > 0 && <span className="text-ink-faint"> · {counts.pending} waiting on seats</span>}
-        </p>
-      )}
+      {/* Pinned like the guest composer, so the form stays reachable however
+          long the rule list gets. */}
+      <div className="sticky top-0 z-10 -mx-1 mb-1 bg-ivory px-1 pt-1 pb-2">
+        <AddRule />
+        {s.constraints.length > 0 && (
+          <p className="mt-1.5 px-1 text-xs font-bold">
+            <span className="text-sage">{counts.ok} kept</span>
+            {counts.violated > 0 && <span className="text-brick"> · {counts.violated} broken</span>}
+            {counts.pending > 0 && <span className="text-ink-faint"> · {counts.pending} waiting on seats</span>}
+          </p>
+        )}
+      </div>
       {s.constraints.length === 0 && (
         <p className="my-1.5 px-1 text-[12.5px] text-ink-soft">
-          Rules like “keep the exes apart” live here — add one below, or just tell your agent.
+          Rules like “keep the exes apart” live here — add one above, or just tell your agent.
         </p>
       )}
       {s.constraints.map((c) => {
         const status = constraintStatus(s, c)
         const statusText = status === 'ok' ? 'kept' : status === 'violated' ? 'broken' : 'waiting — someone is unseated'
         return (
-          <div key={c.id} className="flex items-start gap-2 rounded-md px-1.5 py-1.5 hover:bg-parchment">
+          <div key={c.id} className="flex items-start gap-2 rounded-md px-1.5 py-1.5 hover:bg-accent">
             <span
               className={cn(
                 'mt-1.5 h-2 w-2 shrink-0 rounded-full',
@@ -402,8 +774,6 @@ function RulesSection() {
           </div>
         )
       })}
-      <Separator className="my-2" />
-      <AddRule />
     </>
   )
 }
@@ -414,19 +784,77 @@ export function Sidebar() {
   const s = useStore()
   const brokenCount = s.constraints.filter((c) => constraintStatus(s, c) === 'violated').length
 
+  const [open, setOpenMap] = usePersistedJSON<Record<SectionId, boolean>>('aisle:sidebar:open', {
+    venue: true,
+    guests: true,
+    activity: true,
+    rules: false,
+  })
+  const setOpen = (id: SectionId, v: boolean) => setOpenMap({ ...open, [id]: v })
+
+  const [weights, setWeights] = usePersistedJSON<Record<SectionId, number>>('aisle:sidebar:weights', DEFAULT_WEIGHTS)
+
   return (
-    <aside className="hidden min-h-0 flex-col overflow-y-auto overscroll-contain border-r border-hairline bg-ivory px-2.5 pt-1 pb-6 md:flex">
-      <Section id="guests" title="Guests" count={s.guestOrder.length} defaultOpen>
+    <aside className="hidden min-h-0 flex-col overflow-hidden border-r border-hairline bg-ivory px-2 pt-1 pb-2 md:flex">
+      <Section
+        id="venue"
+        title="Venue"
+        count={`${Object.values(s.venue).filter((feature) => feature.enabled).length}/${VENUE_FEATURES.length}`}
+        open={open.venue}
+        onOpenChange={(v) => setOpen('venue', v)}
+        minHeight={MIN_HEIGHTS.venue}
+        weight={weights.venue}
+      >
+        <VenueSection />
+      </Section>
+      <ResizeHandle above="venue" below="guests" active={open.venue && open.guests} weights={weights} setWeights={setWeights} />
+      <Section
+        id="guests"
+        title="Guests"
+        count={s.guestOrder.length}
+        open={open.guests}
+        onOpenChange={(v) => setOpen('guests', v)}
+        minHeight={MIN_HEIGHTS.guests}
+        weight={weights.guests}
+      >
         <GuestsSection />
       </Section>
-      <Section id="activity" title="Activity" count={s.agentLog.length > 0 ? `${s.agentLog.length} steps` : undefined} defaultOpen>
+      <ResizeHandle above="guests" below="activity" active={open.guests && open.activity} weights={weights} setWeights={setWeights} />
+      <Section
+        id="activity"
+        title="Activity"
+        count={s.agentLog.length > 0 ? `${s.agentLog.length} steps` : undefined}
+        open={open.activity}
+        onOpenChange={(v) => setOpen('activity', v)}
+        minHeight={MIN_HEIGHTS.activity}
+        weight={weights.activity}
+        headerAction={
+          s.agentLog.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              onClick={() => {
+                s.clearActivity()
+                s.setToast('Activity cleared.')
+              }}
+            >
+              Clear
+            </Button>
+          )
+        }
+      >
         <ActivitySection />
       </Section>
+      <ResizeHandle above="activity" below="rules" active={open.activity && open.rules} weights={weights} setWeights={setWeights} />
       <Section
         id="rules"
         title="House rules"
         count={s.constraints.length}
-        defaultOpen={false}
+        open={open.rules}
+        onOpenChange={(v) => setOpen('rules', v)}
+        minHeight={MIN_HEIGHTS.rules}
+        weight={weights.rules}
         closedExtra={brokenCount > 0 ? <span className="text-[11px] text-brick">· {brokenCount} broken</span> : undefined}
       >
         <RulesSection />

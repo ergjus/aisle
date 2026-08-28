@@ -1,5 +1,5 @@
 import type { AisleState, Constraint, Violation, ZoneId } from './types'
-import { ZONES, zoneBands } from './geometry'
+import { zoneBands } from './geometry'
 
 const ZONE_LABEL: Record<ZoneId, string> = {
   dance_floor: 'the dance floor',
@@ -32,6 +32,7 @@ export function constraintStatus(state: AisleState, c: Constraint): ConstraintSt
   }
   const s = state.seating[c.guestId]
   if (!s) return 'pending'
+  if (!state.venue[c.zone]?.enabled) return 'pending'
   const bands = zoneBands(state, c.zone)
   const d = bands.byTable[s.tableId]
   if (d === undefined) return 'pending'
@@ -102,7 +103,7 @@ export function dramaLabel(score: number): string {
 }
 
 export function zoneLabel(zone: ZoneId): string {
-  return ZONES[zone].label
+  return zone === 'dance_floor' ? 'Dance floor' : zone === 'band' ? 'Band & speakers' : 'Entrance'
 }
 
 export function zoneNoun(zone: ZoneId): string {

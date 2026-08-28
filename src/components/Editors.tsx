@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useStore, type Selection } from '../store'
 import type { RSVP } from '../types'
+import { formatFeet, roomRect, stageUnitsPerFoot } from '../geometry'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -35,7 +36,7 @@ function GuestEditor({ sel }: { sel: Selection }) {
   const g = s.guests[sel.id]
   if (!g) return null
   const seat = s.seating[g.id]
-  const groups = [...new Set(s.guestOrder.map((id) => s.guests[id].group))]
+  const groups = s.groupOrder
 
   return (
     <div className={cardCls} style={clampPos(sel.at)}>
@@ -122,9 +123,13 @@ function TableEditor({ sel }: { sel: Selection }) {
   const t = s.tables[sel.id]
   if (!t) return null
   const occ = Object.values(s.seating).filter((a) => a.tableId === t.id).length
+  const room = roomRect(s.venueDimensions)
+  const units = stageUnitsPerFoot(s.venueDimensions)
+  const xFt = (t.x - room.x) / units.x
+  const yFt = (t.y - room.y) / units.y
 
   return (
-    <div className={cardCls} style={clampPos(sel.at, 264, 260)}>
+    <div className={cardCls} style={clampPos(sel.at, 264, 320)}>
       <h3 className="font-serif text-lg leading-tight font-semibold">{t.name}</h3>
       <Field label="Name">
         <Input value={t.name} onChange={(e) => s.updateTable(t.id, { name: e.target.value })} />
@@ -167,8 +172,20 @@ function TableEditor({ sel }: { sel: Selection }) {
           </Select>
         </Field>
       </div>
+      <div className="flex gap-1.5">
+        <Field label="Rotation">
+          <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="icon" className="h-7 w-7" aria-label="Rotate table left 15 degrees" onClick={() => s.updateTable(t.id, { rotation: ((t.rotation ?? 0) + 345) % 360 })}>↶</Button>
+            <span className="min-w-9 text-center text-sm font-bold">{Math.round(t.rotation ?? 0)}°</span>
+            <Button variant="outline" size="icon" className="h-7 w-7" aria-label="Rotate table right 15 degrees" onClick={() => s.updateTable(t.id, { rotation: ((t.rotation ?? 0) + 15) % 360 })}>↷</Button>
+          </div>
+        </Field>
+        <Field label="Position">
+          <span className="flex h-7 items-center text-xs font-semibold text-ink-soft">{formatFeet(xFt)} from left · {formatFeet(yFt)} down</span>
+        </Field>
+      </div>
       <div className="text-xs text-ink-soft">
-        {occ}/{t.seats} seats taken · drag the table to move it around the room
+        {occ}/{t.seats} seats taken · Shift-click to multi-select · press R to rotate
       </div>
       <div className="mt-1 flex justify-between gap-1.5">
         <Button

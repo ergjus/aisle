@@ -109,7 +109,7 @@ export const SAMPLE_GUESTS: Guest[] = [
 ]
 
 function t(id: string, name: string, shape: Table['shape'], seats: number, x: number, y: number): Table {
-  return { id, name, shape, seats, x, y }
+  return { id, name, shape, seats, x, y, rotation: 0 }
 }
 
 export const SAMPLE_TABLES: Table[] = [
@@ -121,8 +121,8 @@ export const SAMPLE_TABLES: Table[] = [
   t('t6', 'Table 6', 'round', 8, 338, 428),
   t('t7', 'Table 7', 'round', 8, 525, 445),
   t('t8', 'Table 8', 'round', 8, 712, 425),
-  t('t9', 'Table 9', 'rect', 10, 300, 628),
-  t('t10', 'Table 10', 'rect', 10, 640, 628),
+  t('t9', 'Table 9', 'rect', 10, 340, 635),
+  t('t10', 'Table 10', 'rect', 10, 660, 635),
 ]
 
 export const SAMPLE_CONSTRAINTS: Constraint[] = [

@@ -1,19 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { ChevronDown } from 'lucide-react'
 import { useStore } from '../store'
-import type { Guest, Table } from '../types'
+import type { Guest, Table, VenueDimensions, VenueFeature, VenueFeatureId } from '../types'
 import {
   CHIP_R,
   STAGE_H,
   STAGE_W,
-  TRAY,
-  ZONES,
+  boundsOverlap,
+  chipPositions,
   dist,
+  featureBounds,
+  featureMinSize,
+  feetSize,
+  formatFeet,
   rectTableSize,
+  roomRect,
   seatPos,
+  snapStageValue,
+  stageUnitsPerFoot,
+  tableBodyBounds,
+  tableBounds,
   tableFootprint,
   tableRadius,
-  trayPos,
 } from '../geometry'
+import { agentChipDelay } from '../agentCursor'
+import { AgentCursor } from './AgentCursor'
 import { computeViolations } from '../constraints'
 import { groupColors, hashId, initials } from '../utils'
 import { SAMPLE } from '../sample'
@@ -21,7 +33,7 @@ import { seatEveryone } from '../actions'
 import { Button } from '@/components/ui/button'
 
 interface DragState {
-  kind: 'chip' | 'table'
+  kind: 'chip' | 'table' | 'feature' | 'resize-feature' | 'rotate-feature' | 'rotate-table'
   id: string
   x: number
   y: number
@@ -29,13 +41,48 @@ interface DragState {
   startStage: { x: number; y: number }
   moved: boolean
   snapshotTaken: boolean
-  target: string | null // tableId or 'tray'
+  target: string | null // tableId or 'tray' for guest chips
+  layoutOrigins?: LayoutOrigin[]
+  startAngle?: number
+  startRotation?: number
+}
+
+type LayoutKind = 'table' | 'feature'
+interface LayoutItem { kind: LayoutKind; id: string }
+interface LayoutOrigin extends LayoutItem { x: number; y: number }
+
+const layoutKey = (kind: LayoutKind, id: string) => `${kind}:${id}`
+
+const FEATURE_GLYPHS: Record<VenueFeatureId, string> = {
+  entrance: '↳',
+  band: '♪',
+  dance_floor: '✦',
+  bathroom: 'WC',
+  photo_booth: '▣',
+  bar: '◒',
+  buffet: '≋',
+  cake_table: '♢',
+  gift_table: '♥',
+}
+
+const FEATURE_SHORT_LABELS: Record<VenueFeatureId, string> = {
+  entrance: 'Entrance',
+  band: 'Band',
+  dance_floor: 'Dance',
+  bathroom: 'Restroom',
+  photo_booth: 'Photos',
+  bar: 'Bar',
+  buffet: 'Buffet',
+  cake_table: 'Cake',
+  gift_table: 'Gifts',
 }
 
 function Chip(props: {
   guest: Guest
-  x: number
-  y: number
+  /** 'stage': positioned via x/y inside the zoomable room. 'flow': a plain flex item in the lounge — no coordinates, no zoom. */
+  layout: 'stage' | 'flow'
+  x?: number
+  y?: number
   color: string
   dragging: boolean
   selected: boolean
@@ -46,20 +93,46 @@ function Chip(props: {
   onPointerDown: (e: React.PointerEvent) => void
   onKeyDown: (e: React.KeyboardEvent) => void
 }) {
-  const { guest, x, y, color, dragging, selected, violated, touchedAt, staggerMs, whereLabel } = props
+  const { guest, x, y, layout, color, dragging, selected, violated, touchedAt, staggerMs, whereLabel } = props
   // A fresh touchedAt remounts the keyed overlays, replaying their one-shot
   // CSS animations. No JS timers: fill-mode ends them, so nothing can stick.
   const flashing = touchedAt !== undefined && Date.now() - touchedAt < 4000
 
-  const cls = ['chip', dragging && 'dragging', selected && 'selected', guest.rsvp === 'pending' && 'rsvp-pending']
+  // The lounge's chip row scrolls, and a CSS-positioned nametag popping up
+  // above a chip near the top of that scroll area gets clipped by it. Flow
+  // chips instead portal their nametag to the body, placed from a measured
+  // rect, so it always floats free above everything.
+  const isFlow = layout === 'flow'
+  const [flowHovered, setFlowHovered] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [tagPos, setTagPos] = useState<{ left: number; top: number } | null>(null)
+  const showFlowTag = isFlow && (flowHovered || selected)
+
+  useEffect(() => {
+    if (!showFlowTag || !rootRef.current) {
+      setTagPos(null)
+      return
+    }
+    const r = rootRef.current.getBoundingClientRect()
+    setTagPos({ left: r.left + r.width / 2, top: r.top })
+  }, [showFlowTag])
+
+  const cls = [
+    'chip',
+    isFlow && 'flow',
+    dragging && 'dragging',
+    selected && 'selected',
+    guest.rsvp === 'pending' && 'rsvp-pending',
+  ]
     .filter(Boolean)
     .join(' ')
 
   return (
     <div
+      ref={rootRef}
       className={cls}
       style={{
-        transform: `translate(${x}px, ${y}px)`,
+        transform: layout === 'stage' ? `translate(${x}px, ${y}px)` : undefined,
         ['--group' as string]: color,
         transitionDelay: dragging ? '0ms' : `${staggerMs}ms`,
       }}
@@ -68,27 +141,94 @@ function Chip(props: {
       aria-label={`${guest.name} — ${whereLabel}${violated ? ' — part of a broken rule' : ''}. Press Enter to edit.`}
       onKeyDown={props.onKeyDown}
       onPointerDown={props.onPointerDown}
+      onPointerEnter={isFlow ? () => setFlowHovered(true) : undefined}
+      onPointerLeave={isFlow ? () => setFlowHovered(false) : undefined}
     >
       {initials(guest.name)}
       {flashing && <span key={touchedAt} className="pulse-ring" style={{ animationDelay: `${staggerMs}ms` }} />}
       {violated && <span className="viol-dot" title="Part of a violated rule" />}
-      <span className="nametag">{guest.name}</span>
-      {flashing && (
+      {!isFlow && <span className="nametag">{guest.name}</span>}
+      {!isFlow && flashing && (
         <span key={`t${touchedAt}`} className="nametag flash" style={{ animationDelay: `${staggerMs}ms` }}>
           {guest.name}
         </span>
       )}
+      {isFlow &&
+        tagPos &&
+        createPortal(
+          <span className="nametag-portal" style={{ left: tagPos.left, top: tagPos.top }}>
+            {guest.name}
+          </span>,
+          document.body,
+        )}
     </div>
   )
+}
+
+/** The lounge footer's height is a screen-pixel size, not a stage one — it
+ *  never scales or shifts with zoom. These bound how far it can be resized. */
+const LOUNGE_DEFAULT_H = 148
+const LOUNGE_MIN_H = 96
+const LOUNGE_MAX_H = 420
+/** Height while collapsed — just the header bar. */
+const LOUNGE_COLLAPSED_H = 34
+
+function readPersistedNumber(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key)
+    const n = raw === null ? NaN : Number(raw)
+    return Number.isFinite(n) ? n : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function readPersistedBool(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? fallback : raw === '1'
+  } catch {
+    return fallback
+  }
 }
 
 export function Canvas() {
   const s = useStore()
   const wrapRef = useRef<HTMLDivElement>(null)
+  const loungeRef = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 800, h: 600 })
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [layoutSelection, setLayoutSelection] = useState<LayoutItem[]>([])
+  const [guides, setGuides] = useState<{ x?: number; y?: number }>({})
+  const [zoom, setZoom] = useState(1)
+  const [loungeHeight, setLoungeHeightState] = useState(() => readPersistedNumber('aisle:lounge:height', LOUNGE_DEFAULT_H))
+  const [loungeCollapsed, setLoungeCollapsedState] = useState(() => readPersistedBool('aisle:lounge:collapsed', false))
+  const [loungeResizing, setLoungeResizing] = useState(false)
   const dragRef = useRef<DragState | null>(null)
   dragRef.current = drag
+
+  const setLoungeHeight = (v: number) => {
+    const clamped = Math.max(LOUNGE_MIN_H, Math.min(LOUNGE_MAX_H, v))
+    setLoungeHeightState(clamped)
+    try {
+      localStorage.setItem('aisle:lounge:height', String(clamped))
+    } catch {
+      // Preference simply won't stick.
+    }
+  }
+
+  const setLoungeCollapsed = (v: boolean) => {
+    setLoungeCollapsedState(v)
+    try {
+      localStorage.setItem('aisle:lounge:collapsed', v ? '1' : '0')
+    } catch {
+      // Preference simply won't stick.
+    }
+  }
+
+  // The footer's actual on-screen height right now — collapsed pins it to
+  // just the header bar, regardless of the resized height underneath.
+  const loungeH = loungeCollapsed ? LOUNGE_COLLAPSED_H : loungeHeight
 
   useEffect(() => {
     const el = wrapRef.current
@@ -99,12 +239,25 @@ export function Canvas() {
     return () => ro.disconnect()
   }, [])
 
-  const scale = Math.min(box.w / STAGE_W, box.h / STAGE_H)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLayoutSelection([])
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // The room stage only ever fits into the space above the lounge footer —
+  // the footer itself is a fixed-height sibling, never part of the zoomed
+  // transform, so it can't be pushed around or resized by zooming.
+  const roomAvailH = Math.max(0, box.h - loungeH)
+  const fitScale = Math.min(box.w / STAGE_W, roomAvailH / STAGE_H)
+  const scale = fitScale * zoom
   const ox = (box.w - STAGE_W * scale) / 2
-  const oy = (box.h - STAGE_H * scale) / 2
+  const oy = (roomAvailH - STAGE_H * scale) / 2
 
   const colors = useMemo(() => groupColors(s), [s.guests, s.guestOrder])
-  const violations = useMemo(() => computeViolations(s), [s.guests, s.tables, s.seating, s.constraints, s.tableOrder, s.guestOrder])
+  const violations = useMemo(() => computeViolations(s), [s.guests, s.tables, s.seating, s.constraints, s.tableOrder, s.guestOrder, s.venue])
 
   const violatedGuests = useMemo(() => {
     const set = new Set<string>()
@@ -140,40 +293,107 @@ export function Canvas() {
     [s.guestOrder, s.guests],
   )
 
-  const positions = useMemo(() => {
-    const pos: Record<string, { x: number; y: number }> = {}
-    let trayIndex = 0
-    for (const id of attending) {
-      const seat = s.seating[id]
-      if (seat && s.tables[seat.tableId]) {
-        pos[id] = seatPos(s.tables[seat.tableId], seat.seat)
-      } else {
-        pos[id] = trayPos(trayIndex++)
+  // Seated guests live on the zoomable stage; unseated ones live in the fixed
+  // lounge footer below it, which zoom never touches.
+  const seatedAttending = useMemo(() => attending.filter((id) => s.seating[id]), [attending, s.seating])
+  const unseatedAttending = useMemo(() => attending.filter((id) => !s.seating[id]), [attending, s.seating])
+
+  const positions = useMemo(
+    () => chipPositions(s),
+    [s.guests, s.guestOrder, s.seating, s.tables, s.venueDimensions],
+  )
+
+  const unseatedCount = unseatedAttending.length
+  const room = roomRect(s.venueDimensions)
+  const unitsPerFoot = stageUnitsPerFoot(s.venueDimensions)
+
+  const collisions = useMemo(() => {
+    const map = new Map<string, string[]>()
+    const add = (key: string, label: string) => map.set(key, [...(map.get(key) ?? []), label])
+    const tables = s.tableOrder.map((id) => s.tables[id])
+    const features = Object.values(s.venue).filter((feature) => feature.enabled)
+    for (let i = 0; i < tables.length; i++) {
+      for (let j = i + 1; j < tables.length; j++) {
+        if (!boundsOverlap(tableBounds(tables[i], s.venueDimensions), tableBounds(tables[j], s.venueDimensions))) continue
+        add(layoutKey('table', tables[i].id), tables[j].name)
+        add(layoutKey('table', tables[j].id), tables[i].name)
+      }
+      for (const feature of features) {
+        if (!boundsOverlap(tableBounds(tables[i], s.venueDimensions), featureBounds(feature))) continue
+        add(layoutKey('table', tables[i].id), feature.label)
+        add(layoutKey('feature', feature.id), tables[i].name)
       }
     }
-    return pos
-  }, [attending, s.seating, s.tables])
-
-  const unseatedCount = attending.filter((id) => !s.seating[id]).length
+    for (let i = 0; i < features.length; i++) {
+      for (let j = i + 1; j < features.length; j++) {
+        if (!boundsOverlap(featureBounds(features[i]), featureBounds(features[j]))) continue
+        add(layoutKey('feature', features[i].id), features[j].label)
+        add(layoutKey('feature', features[j].id), features[i].label)
+      }
+    }
+    return map
+  }, [s.tableOrder, s.tables, s.venue, s.venueDimensions])
 
   const toStage = (clientX: number, clientY: number) => {
     const rect = wrapRef.current!.getBoundingClientRect()
     return { x: (clientX - rect.left - ox) / scale, y: (clientY - rect.top - oy) / scale }
   }
 
-  const dropTargetAt = (p: { x: number; y: number }): string | null => {
+  // The lounge is a fixed screen rectangle now (not part of the zoomed
+  // stage), so it's hit-tested in real screen pixels, not stage units.
+  const overLounge = (clientX: number, clientY: number): boolean => {
+    const rect = loungeRef.current?.getBoundingClientRect()
+    if (!rect) return false
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+  }
+
+  const dropTargetAt = (p: { x: number; y: number }, client: { x: number; y: number }): string | null => {
+    if (overLounge(client.x, client.y)) return 'tray'
     for (const tid of s.tableOrder) {
       const t = s.tables[tid]
-      if (dist(p, t) <= tableFootprint(t) + 12) return tid
+      if (dist(p, t) <= tableFootprint(t, s.venueDimensions) + 12) return tid
     }
-    if (p.x >= TRAY.x && p.x <= TRAY.x + TRAY.w && p.y >= TRAY.y && p.y <= TRAY.y + TRAY.h) return 'tray'
     return null
   }
 
-  const beginDrag = (e: React.PointerEvent, kind: 'chip' | 'table', id: string, stagePos: { x: number; y: number }) => {
+  // Dragging the lounge's own top edge — a self-contained gesture with its
+  // own window listeners, independent of the chip/table drag state machine.
+  const onLoungeResizeStart = (e: React.PointerEvent) => {
+    if (loungeCollapsed) return
+    e.preventDefault()
+    setLoungeResizing(true)
+    const startY = e.clientY
+    const startH = loungeHeight
+    const onMove = (ev: PointerEvent) => setLoungeHeight(startH - (ev.clientY - startY))
+    const onUp = () => {
+      setLoungeResizing(false)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  const beginDrag = (
+    e: React.PointerEvent,
+    kind: DragState['kind'],
+    id: string,
+    stagePos: { x: number; y: number },
+  ) => {
     if (e.button !== 0) return
     e.stopPropagation()
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
+    let layoutOrigins: LayoutOrigin[] | undefined
+    if (kind === 'table' || kind === 'feature') {
+      const item = { kind, id } as LayoutItem
+      const selected = layoutSelection.some((entry) => layoutKey(entry.kind, entry.id) === layoutKey(kind, id))
+      const moving = selected ? layoutSelection : [item]
+      if (!e.shiftKey && !selected) setLayoutSelection([item])
+      layoutOrigins = moving.map((entry) => {
+        const target = entry.kind === 'table' ? s.tables[entry.id] : s.venue[entry.id as VenueFeatureId]
+        return { ...entry, x: target.x, y: target.y }
+      })
+    }
     setDrag({
       kind,
       id,
@@ -184,7 +404,96 @@ export function Canvas() {
       moved: false,
       snapshotTaken: false,
       target: null,
+      layoutOrigins,
     })
+  }
+
+  const beginRotate = (e: React.PointerEvent, kind: 'rotate-feature' | 'rotate-table', id: string) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+    const table = kind === 'rotate-table' ? s.tables[id] : undefined
+    const feature = kind === 'rotate-feature' ? s.venue[id as VenueFeatureId] : undefined
+    const target = table ?? feature
+    if (!target) return
+    const center = table
+      ? { x: table.x, y: table.y }
+      : { x: feature!.x + feature!.w / 2, y: feature!.y + feature!.h / 2 }
+    const pointer = toStage(e.clientX, e.clientY)
+    setDrag({
+      kind,
+      id,
+      x: center.x,
+      y: center.y,
+      startClient: { x: e.clientX, y: e.clientY },
+      startStage: center,
+      startAngle: Math.atan2(pointer.y - center.y, pointer.x - center.x),
+      startRotation: target.rotation ?? 0,
+      moved: false,
+      snapshotTaken: false,
+      target: null,
+    })
+  }
+
+  const moveLayout = (d: DragState, rawX: number, rawY: number, bypassSnap: boolean) => {
+    const origins = d.layoutOrigins ?? []
+    const primary = origins.find((item) => item.kind === d.kind && item.id === d.id)
+    if (!primary) return
+    let targetX = bypassSnap ? rawX : snapStageValue(rawX, 'x', s.venueDimensions)
+    let targetY = bypassSnap ? rawY : snapStageValue(rawY, 'y', s.venueDimensions)
+    const primaryFeature = d.kind === 'feature' ? s.venue[d.id as VenueFeatureId] : null
+    let centerX = d.kind === 'table' ? targetX : targetX + (primaryFeature?.w ?? 0) / 2
+    let centerY = d.kind === 'table' ? targetY : targetY + (primaryFeature?.h ?? 0) / 2
+    const movingKeys = new Set(origins.map((item) => layoutKey(item.kind, item.id)))
+    const otherCenters: { x: number; y: number }[] = []
+    for (const id of s.tableOrder) {
+      if (!movingKeys.has(layoutKey('table', id))) otherCenters.push({ x: s.tables[id].x, y: s.tables[id].y })
+    }
+    for (const feature of Object.values(s.venue)) {
+      if (feature.enabled && !movingKeys.has(layoutKey('feature', feature.id))) {
+        otherCenters.push({ x: feature.x + feature.w / 2, y: feature.y + feature.h / 2 })
+      }
+    }
+    const nextGuides: { x?: number; y?: number } = {}
+    if (!bypassSnap) {
+      const alignX = otherCenters.find((point) => Math.abs(point.x - centerX) <= 8)
+      const alignY = otherCenters.find((point) => Math.abs(point.y - centerY) <= 8)
+      if (alignX) {
+        targetX += alignX.x - centerX
+        centerX = alignX.x
+        nextGuides.x = alignX.x
+      }
+      if (alignY) {
+        targetY += alignY.y - centerY
+        centerY = alignY.y
+        nextGuides.y = alignY.y
+      }
+    }
+    let deltaX = targetX - primary.x
+    let deltaY = targetY - primary.y
+    let left = Infinity
+    let top = Infinity
+    let right = -Infinity
+    let bottom = -Infinity
+    for (const item of origins) {
+      const bounds = item.kind === 'table'
+        ? tableBodyBounds({ ...s.tables[item.id], x: item.x, y: item.y }, s.venueDimensions)
+        : featureBounds({ ...s.venue[item.id as VenueFeatureId], x: item.x, y: item.y })
+      left = Math.min(left, bounds.left)
+      top = Math.min(top, bounds.top)
+      right = Math.max(right, bounds.right)
+      bottom = Math.max(bottom, bounds.bottom)
+    }
+    deltaX = Math.max(room.x + 6 - left, Math.min(room.x + room.w - 6 - right, deltaX))
+    deltaY = Math.max(room.y + 6 - top, Math.min(room.y + room.h - 6 - bottom, deltaY))
+    if (!d.snapshotTaken) s.snapshot(origins.length > 1 ? 'move selection' : d.kind === 'table' ? 'move table' : 'move venue feature')
+    for (const item of origins) {
+      if (item.kind === 'table') s.moveTable(item.id, item.x + deltaX, item.y + deltaY)
+      else s.updateVenueFeature(item.id as VenueFeatureId, { x: item.x + deltaX, y: item.y + deltaY }, { snapshot: false })
+    }
+    setGuides(nextGuides)
+    setDrag({ ...d, x: primary.x + deltaX, y: primary.y + deltaY, moved: true, snapshotTaken: true })
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -196,16 +505,41 @@ export function Canvas() {
     if (!moved) return
     const x = d.startStage.x + dx / scale
     const y = d.startStage.y + dy / scale
-    if (d.kind === 'table') {
-      if (!d.snapshotTaken) s.snapshot('move table')
-      const t = s.tables[d.id]
-      const half = t ? tableFootprint(t) : 60
-      const cx = Math.max(half, Math.min(STAGE_W - half, x))
-      const cy = Math.max(half, Math.min(TRAY.y - 40, y))
-      s.moveTable(d.id, cx, cy)
-      setDrag({ ...d, x: cx, y: cy, moved: true, snapshotTaken: true })
+    if (d.kind === 'rotate-feature' || d.kind === 'rotate-table') {
+      const pointer = toStage(e.clientX, e.clientY)
+      const angle = Math.atan2(pointer.y - d.startStage.y, pointer.x - d.startStage.x)
+      const degrees = (angle - (d.startAngle ?? angle)) * 180 / Math.PI
+      const rawRotation = (d.startRotation ?? 0) + degrees
+      const increment = e.altKey ? 1 : e.shiftKey ? 5 : 15
+      const rotation = ((Math.round(rawRotation / increment) * increment) % 360 + 360) % 360
+      if (!d.snapshotTaken) s.snapshot(d.kind === 'rotate-table' ? 'rotate table' : 'rotate venue feature')
+      if (d.kind === 'rotate-table') s.updateTable(d.id, { rotation }, { snapshot: false })
+      else s.updateVenueFeature(d.id as VenueFeatureId, { rotation }, { snapshot: false })
+      setDrag({ ...d, moved: true, snapshotTaken: true })
+    } else if (d.kind === 'table' || d.kind === 'feature') {
+      moveLayout(d, x, y, e.altKey)
+    } else if (d.kind === 'resize-feature') {
+      const feature = s.venue[d.id as VenueFeatureId]
+      if (!feature) return
+      if (!d.snapshotTaken) s.snapshot('resize venue feature')
+      const min = featureMinSize(feature.id, s.venueDimensions)
+      const rotation = -((feature.rotation ?? 0) * Math.PI) / 180
+      const stageDx = dx / scale
+      const stageDy = dy / scale
+      const localDx = stageDx * Math.cos(rotation) - stageDy * Math.sin(rotation)
+      const localDy = stageDx * Math.sin(rotation) + stageDy * Math.cos(rotation)
+      const rawW = d.startStage.x + localDx
+      const rawH = d.startStage.y + localDy
+      const stepX = unitsPerFoot.x * s.venueDimensions.snapFt
+      const stepY = unitsPerFoot.y * s.venueDimensions.snapFt
+      const snappedW = e.altKey || stepX <= 0 ? rawW : Math.round(rawW / stepX) * stepX
+      const snappedH = e.altKey || stepY <= 0 ? rawH : Math.round(rawH / stepY) * stepY
+      const w = Math.max(min.w, Math.min(room.x + room.w - feature.x - 8, snappedW))
+      const h = Math.max(min.h, Math.min(room.y + room.h - feature.y - 8, snappedH))
+      s.updateVenueFeature(feature.id, { w, h }, { snapshot: false })
+      setDrag({ ...d, x: w, y: h, moved: true, snapshotTaken: true })
     } else {
-      setDrag({ ...d, x, y, moved: true, target: dropTargetAt({ x, y }) })
+      setDrag({ ...d, x, y, moved: true, target: dropTargetAt({ x, y }, { x: e.clientX, y: e.clientY }) })
     }
   }
 
@@ -213,12 +547,37 @@ export function Canvas() {
     const d = dragRef.current
     if (!d) return
     setDrag(null)
+    setGuides({})
     if (!d.moved) {
-      s.setSelection({ kind: d.kind === 'chip' ? 'guest' : 'table', id: d.id, at: { x: e.clientX + 14, y: e.clientY - 8 } })
+      if (d.kind === 'rotate-feature' || d.kind === 'rotate-table') {
+        s.snapshot(d.kind === 'rotate-table' ? 'rotate table' : 'rotate venue feature')
+        if (d.kind === 'rotate-table') {
+          const table = s.tables[d.id]
+          if (table) s.updateTable(d.id, { rotation: ((table.rotation ?? 0) + 15) % 360 }, { snapshot: false })
+        } else {
+          const feature = s.venue[d.id as VenueFeatureId]
+          if (feature) s.updateVenueFeature(feature.id, { rotation: ((feature.rotation ?? 0) + 15) % 360 }, { snapshot: false })
+        }
+      } else if (d.kind === 'table' || d.kind === 'feature') {
+        const item = { kind: d.kind, id: d.id } as LayoutItem
+        if (e.shiftKey) {
+          setLayoutSelection((current) => {
+            const exists = current.some((entry) => layoutKey(entry.kind, entry.id) === layoutKey(item.kind, item.id))
+            return exists
+              ? current.filter((entry) => layoutKey(entry.kind, entry.id) !== layoutKey(item.kind, item.id))
+              : [...current, item]
+          })
+        } else {
+          setLayoutSelection([item])
+          if (d.kind === 'table') s.setSelection({ kind: 'table', id: d.id, at: { x: e.clientX + 14, y: e.clientY - 8 } })
+        }
+      } else if (d.kind === 'chip') {
+        s.setSelection({ kind: 'guest', id: d.id, at: { x: e.clientX + 14, y: e.clientY - 8 } })
+      }
       return
     }
     if (d.kind === 'chip') {
-      const target = dropTargetAt({ x: d.x, y: d.y })
+      const target = dropTargetAt({ x: d.x, y: d.y }, { x: e.clientX, y: e.clientY })
       const name = s.guests[d.id]?.name
       if (target === 'tray') {
         if (s.seating[d.id]) {
@@ -232,8 +591,17 @@ export function Canvas() {
         else if (from !== target) s.logActivity('drag', `Seated ${name} at ${s.tables[target]?.name}.`, 'you')
       }
       // No target: the chip glides home on its own.
-    } else if (d.moved) {
-      s.logActivity('drag', `Moved ${s.tables[d.id]?.name}.`, 'you')
+    } else if (d.kind === 'rotate-feature' || d.kind === 'rotate-table') {
+      const label = d.kind === 'rotate-table' ? s.tables[d.id]?.name : s.venue[d.id as VenueFeatureId]?.label
+      const rotation = d.kind === 'rotate-table' ? s.tables[d.id]?.rotation : s.venue[d.id as VenueFeatureId]?.rotation
+      s.logActivity('rotate', `Rotated ${label} to ${Math.round(rotation ?? 0)}°.`, 'you')
+    } else if ((d.kind === 'table' || d.kind === 'feature') && d.moved) {
+      const count = d.layoutOrigins?.length ?? 1
+      const label = d.kind === 'table' ? s.tables[d.id]?.name : s.venue[d.id as VenueFeatureId]?.label
+      s.logActivity(d.kind === 'table' ? 'drag' : 'venue', count > 1 ? `Moved ${count} selected layout items.` : `Moved ${label}.`, 'you')
+    } else if (d.kind === 'resize-feature' && d.moved) {
+      const feature = s.venue[d.id as VenueFeatureId]
+      s.logActivity('venue', `Resized ${feature?.label} to ${Math.round(feature?.w ?? 0)} × ${Math.round(feature?.h ?? 0)}.`, 'you')
     }
   }
 
@@ -246,31 +614,123 @@ export function Canvas() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerLeave={() => drag?.kind === 'chip' && setDrag(null)}
+      onWheel={(event) => {
+        if (!event.ctrlKey && !event.metaKey) return
+        event.preventDefault()
+        setZoom((value) => Math.max(0.6, Math.min(1.8, value + (event.deltaY < 0 ? 0.1 : -0.1))))
+      }}
     >
+      <div className="canvas-zoom-controls" role="group" aria-label="Floor plan zoom">
+        <button
+          type="button"
+          aria-label="Zoom out"
+          disabled={zoom <= 0.6}
+          onClick={() => setZoom((value) => Math.max(0.6, value - 0.1))}
+        >
+          −
+        </button>
+        <button type="button" className="zoom-readout" aria-label={`Reset zoom. Current zoom ${Math.round(zoom * 100)} percent`} onClick={() => setZoom(1)}>
+          {Math.round(zoom * 100)}%
+        </button>
+        <button
+          type="button"
+          aria-label="Zoom in"
+          disabled={zoom >= 1.8}
+          onClick={() => setZoom((value) => Math.min(1.8, value + 0.1))}
+        >
+          +
+        </button>
+      </div>
       <div
         className="stage"
         style={{ width: STAGE_W, height: STAGE_H, transform: `translate(${ox}px, ${oy}px) scale(${scale})` }}
+        onPointerDown={(e) => {
+          if (e.currentTarget === e.target) setLayoutSelection([])
+        }}
       >
-        <div className="room-frame" />
-
-        {Object.values(ZONES).map((z) => (
-          <div
-            key={z.id}
-            className={`zone zone-${z.id}`}
-            style={{ left: z.x, top: z.y, width: z.w, height: z.h }}
-          >
-            {z.id === 'band' && <span className="glyphs">♪ ♬ ♪</span>}
-            <span className="zone-label">{z.label}</span>
-          </div>
-        ))}
-
-        <div className={`tray${drag?.kind === 'chip' && drag.target === 'tray' ? ' drop-target' : ''}`} style={{ left: TRAY.x, top: TRAY.y, width: TRAY.w, height: TRAY.h }}>
-          <span className="tray-label">
-            {drag?.kind === 'chip'
-              ? 'The lounge — drop here to unseat'
-              : `The lounge — not yet seated${unseatedCount > 0 ? ` · ${unseatedCount}` : ''}`}
-          </span>
+        <div
+          className="room-frame"
+          style={{
+            left: room.x,
+            top: room.y,
+            width: room.w,
+            height: room.h,
+            ['--grid-x' as string]: `${unitsPerFoot.x * 5}px`,
+            ['--grid-y' as string]: `${unitsPerFoot.y * 5}px`,
+          }}
+        />
+        <div className="room-caption" style={{ left: room.x + room.w / 2, top: room.y - 6 }}>
+          Main room · {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)}
         </div>
+        <div className="scale-bar" style={{ left: room.x + 18, top: room.y + room.h + 6, width: unitsPerFoot.x * 10 }}>
+          <span>10′</span>
+        </div>
+        {guides.x !== undefined && <span className="alignment-guide vertical" style={{ left: guides.x, top: room.y, height: room.h }} />}
+        {guides.y !== undefined && <span className="alignment-guide horizontal" style={{ left: room.x, top: guides.y, width: room.w }} />}
+        {layoutSelection.length > 1 && (
+          <div className="selection-status" style={{ left: room.x + room.w / 2, top: room.y + 36 }}>
+            {layoutSelection.length} selected · drag together · Esc clears
+          </div>
+        )}
+
+        {Object.values(s.venue).map((feature) =>
+          feature.enabled ? (
+            <VenueFeatureView
+              key={feature.id}
+              feature={feature}
+              dimensions={s.venueDimensions}
+              selected={layoutSelection.some((entry) => layoutKey(entry.kind, entry.id) === layoutKey('feature', feature.id))}
+              overlaps={collisions.get(layoutKey('feature', feature.id)) ?? []}
+              active={
+                (drag?.kind === 'feature' || drag?.kind === 'resize-feature' || drag?.kind === 'rotate-feature') && drag.id === feature.id
+                  ? drag.kind
+                  : null
+              }
+              onPointerDown={(e) => beginDrag(e, 'feature', feature.id, { x: feature.x, y: feature.y })}
+              onResizePointerDown={(e) => beginDrag(e, 'resize-feature', feature.id, { x: feature.w, y: feature.h })}
+              onRotatePointerDown={(e) => beginRotate(e, 'rotate-feature', feature.id)}
+              onKeyDown={(e) => {
+                if (e.key.toLowerCase() === 'r') {
+                  e.preventDefault()
+                  s.updateVenueFeature(feature.id, { rotation: ((feature.rotation ?? 0) + 15) % 360 })
+                  return
+                }
+                const xDelta = unitsPerFoot.x * (e.shiftKey ? 0.5 : s.venueDimensions.snapFt || 1)
+                const yDelta = unitsPerFoot.y * (e.shiftKey ? 0.5 : s.venueDimensions.snapFt || 1)
+                let dx = 0
+                let dy = 0
+                if (e.key === 'ArrowLeft') dx = -xDelta
+                else if (e.key === 'ArrowRight') dx = xDelta
+                else if (e.key === 'ArrowUp') dy = -yDelta
+                else if (e.key === 'ArrowDown') dy = yDelta
+                else return
+                e.preventDefault()
+                s.updateVenueFeature(feature.id, {
+                  x: Math.max(room.x + 8, Math.min(room.x + room.w - feature.w - 8, feature.x + dx)),
+                  y: Math.max(room.y + 8, Math.min(room.y + room.h - feature.h - 8, feature.y + dy)),
+                })
+              }}
+              onResizeKeyDown={(e) => {
+                const xDelta = unitsPerFoot.x * (e.shiftKey ? 0.5 : s.venueDimensions.snapFt || 1)
+                const yDelta = unitsPerFoot.y * (e.shiftKey ? 0.5 : s.venueDimensions.snapFt || 1)
+                const min = featureMinSize(feature.id, s.venueDimensions)
+                let dw = 0
+                let dh = 0
+                if (e.key === 'ArrowLeft') dw = -xDelta
+                else if (e.key === 'ArrowRight') dw = xDelta
+                else if (e.key === 'ArrowUp') dh = -yDelta
+                else if (e.key === 'ArrowDown') dh = yDelta
+                else return
+                e.preventDefault()
+                s.updateVenueFeature(feature.id, {
+                  w: Math.max(min.w, Math.min(room.x + room.w - feature.x - 8, feature.w + dw)),
+                  h: Math.max(min.h, Math.min(room.y + room.h - feature.y - 8, feature.h + dh)),
+                })
+              }}
+              onRotate={() => s.updateVenueFeature(feature.id, { rotation: ((feature.rotation ?? 0) + 15) % 360 })}
+            />
+          ) : null,
+        )}
 
         {/* violation lines under chips */}
         <svg className="viol-lines" width={STAGE_W} height={STAGE_H}>
@@ -288,8 +748,8 @@ export function Canvas() {
         {s.tableOrder.map((tid) => {
           const t = s.tables[tid]
           const isRound = t.shape === 'round'
-          const r = tableRadius(t)
-          const size = isRound ? { w: r * 2, h: r * 2 } : rectTableSize(t)
+          const r = tableRadius(t, s.venueDimensions)
+          const size = isRound ? { w: r * 2, h: r * 2 } : rectTableSize(t, s.venueDimensions)
           const occSeats = new Set(
             Object.values(s.seating)
               .filter((a) => a.tableId === tid)
@@ -307,10 +767,20 @@ export function Canvas() {
               badge={badge}
               touchedAt={touchedAt}
               selected={s.selection?.kind === 'table' && s.selection.id === tid}
+              layoutSelected={layoutSelection.some((entry) => layoutKey(entry.kind, entry.id) === layoutKey('table', tid))}
+              overlaps={collisions.get(layoutKey('table', tid)) ?? []}
               dropTarget={isTarget}
               dragging={drag?.kind === 'table' && drag.id === tid}
+              rotating={drag?.kind === 'rotate-table' && drag.id === tid}
               onPointerDown={(e) => beginDrag(e, 'table', tid, { x: t.x, y: t.y })}
+              onRotatePointerDown={(e) => beginRotate(e, 'rotate-table', tid)}
+              onRotate={() => s.updateTable(tid, { rotation: ((t.rotation ?? 0) + 15) % 360 })}
               onKeyDown={(e) => {
+                if (e.key.toLowerCase() === 'r') {
+                  e.preventDefault()
+                  s.updateTable(tid, { rotation: ((t.rotation ?? 0) + 15) % 360 })
+                  return
+                }
                 if (e.key !== 'Enter' && e.key !== ' ') return
                 e.preventDefault()
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -330,31 +800,38 @@ export function Canvas() {
           )
           return Array.from({ length: t.seats }, (_, i) => {
             if (occSeats.has(i)) return null
-            const p = seatPos(t, i)
+            const p = seatPos(t, i, s.venueDimensions)
             return <span key={`${tid}-${i}`} className="seat-dot" style={{ left: p.x, top: p.y }} />
           })
         })}
 
-        {attending.map((id) => {
+        {seatedAttending.map((id) => {
+          // The actively-dragged chip renders once, in the drag-ghost layer
+          // below — so it can cross over the lounge footer without being
+          // painted under it.
+          if (drag?.kind === 'chip' && drag.id === id) return null
           const g = s.guests[id]
-          const isDragging = drag?.kind === 'chip' && drag.id === id
-          const p = isDragging ? { x: drag.x, y: drag.y } : positions[id]
+          const p = positions[id]
           if (!p) return null
           const touchedAt = s.touched[id]
           const recentTouch = touchedAt && Date.now() - touchedAt < 1500
+          // The agent cursor may be flying over to pick this chip up — hold the
+          // chip's departure until the cursor gets there.
+          const escortDelay = agentChipDelay(id)
           return (
             <Chip
               key={id}
               guest={g}
+              layout="stage"
               x={p.x}
               y={p.y}
               color={colors[g.group]}
-              dragging={!!isDragging}
+              dragging={false}
               selected={s.selection?.kind === 'guest' && s.selection.id === id}
               violated={violatedGuests.has(id)}
               touchedAt={touchedAt}
-              staggerMs={recentTouch ? (hashId(id) % 12) * 30 : 0}
-              whereLabel={s.seating[id] ? `at ${s.tables[s.seating[id].tableId]?.name}` : 'in the lounge'}
+              staggerMs={escortDelay ?? (recentTouch ? (hashId(id) % 12) * 30 : 0)}
+              whereLabel={`at ${s.tables[s.seating[id].tableId]?.name}`}
               onPointerDown={(e) => beginDrag(e, 'chip', id, positions[id])}
               onKeyDown={(e) => {
                 if (e.key !== 'Enter' && e.key !== ' ') return
@@ -366,22 +843,7 @@ export function Canvas() {
           )
         })}
 
-        {s.guestOrder.length > 0 && (
-          <div className="legend" aria-label="Chart legend">
-            {Object.entries(colors).map(([group, color]) => (
-              <span className="legend-item" key={group}>
-                <span className="legend-swatch" style={{ background: color }} />
-                {group}
-              </span>
-            ))}
-            {s.constraints.length > 0 && (
-              <span className="legend-item">
-                <span className="legend-line" aria-hidden="true" />
-                broken rule
-              </span>
-            )}
-          </div>
-        )}
+        <AgentCursor />
 
         {s.finalized && <div className="ribbon">❦ &nbsp;Finalized — every guest seated, zero drama&nbsp; ❦</div>}
 
@@ -393,15 +855,6 @@ export function Canvas() {
           >
             ⚠ {violations.length} rule{violations.length === 1 ? '' : 's'} broken · Fix With Minimal Moves
           </button>
-        )}
-
-        {!s.agentConnected && !empty && (
-          <div className="canvas-hint">
-            <span className="spark">✳</span>{' '}
-            {unseatedCount > 0
-              ? 'Drag guests onto tables, press Seat Everyone — or ask your AI agent'
-              : 'This page speaks WebMCP — open it with your AI agent and plan together'}
-          </div>
         )}
 
         {empty && (
@@ -434,6 +887,176 @@ export function Canvas() {
           </div>
         )}
       </div>
+
+      {/* The lounge — a fixed footer, sized and positioned in real screen
+          pixels, entirely outside the zoomed stage above. Zooming the room
+          never moves, grows, or shrinks it. Its own height is user-resizable
+          (drag the top edge) and collapsible (the chevron), independent of
+          zoom entirely. */}
+      <div
+        ref={loungeRef}
+        className={[
+          'lounge',
+          drag?.kind === 'chip' && drag.target === 'tray' && 'drop-target',
+          loungeCollapsed && 'collapsed',
+          loungeResizing && 'resizing',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        style={{ height: loungeH }}
+      >
+        <div
+          className={`lounge-resize-handle${loungeCollapsed ? ' disabled' : ''}`}
+          onPointerDown={onLoungeResizeStart}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize the lounge"
+          aria-disabled={loungeCollapsed}
+        />
+        <div className="lounge-header">
+          <button
+            type="button"
+            className="lounge-collapse-btn"
+            aria-expanded={!loungeCollapsed}
+            aria-label={loungeCollapsed ? 'Expand the lounge' : 'Collapse the lounge'}
+            onClick={() => setLoungeCollapsed(!loungeCollapsed)}
+          >
+            <ChevronDown className={`lounge-chevron${loungeCollapsed ? ' collapsed' : ''}`} aria-hidden="true" />
+            <span className="lounge-label">Lounge</span>
+          </button>
+          <span className="lounge-meta">{drag?.kind === 'chip' ? 'Drop to unseat' : `${unseatedCount} unseated`}</span>
+        </div>
+        {!loungeCollapsed && (
+          <div className="lounge-chips">
+            {unseatedAttending
+              .filter((id) => !(drag?.kind === 'chip' && drag.id === id))
+              .map((id) => {
+                const g = s.guests[id]
+                const touchedAt = s.touched[id]
+                const recentTouch = touchedAt && Date.now() - touchedAt < 1500
+                const escortDelay = agentChipDelay(id)
+                return (
+                  <Chip
+                    key={id}
+                    guest={g}
+                    layout="flow"
+                    color={colors[g.group]}
+                    dragging={false}
+                    selected={s.selection?.kind === 'guest' && s.selection.id === id}
+                    violated={violatedGuests.has(id)}
+                    touchedAt={touchedAt}
+                    staggerMs={escortDelay ?? (recentTouch ? (hashId(id) % 12) * 30 : 0)}
+                    whereLabel="in the lounge"
+                    onPointerDown={(e) => beginDrag(e, 'chip', id, toStage(e.clientX, e.clientY))}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return
+                      e.preventDefault()
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      s.setSelection({ kind: 'guest', id, at: { x: r.right + 10, y: r.top - 8 } })
+                    }}
+                  />
+                )
+              })}
+            {unseatedAttending.length === 0 && <span className="lounge-empty">Everyone's seated.</span>}
+          </div>
+        )}
+      </div>
+
+      {/* The one actively-dragged chip, drawn in its own layer on top of both
+          the stage and the lounge, using the stage's own transform — so it
+          glides smoothly across the boundary between the two in either
+          direction without disappearing under the lounge's background. */}
+      {drag?.kind === 'chip' && s.guests[drag.id] && (
+        <div className="drag-ghost-layer" style={{ transform: `translate(${ox}px, ${oy}px) scale(${scale})` }}>
+          <Chip
+            guest={s.guests[drag.id]}
+            layout="stage"
+            x={drag.x}
+            y={drag.y}
+            color={colors[s.guests[drag.id].group]}
+            dragging
+            selected={s.selection?.kind === 'guest' && s.selection.id === drag.id}
+            violated={violatedGuests.has(drag.id)}
+            touchedAt={undefined}
+            staggerMs={0}
+            whereLabel={s.seating[drag.id] ? `at ${s.tables[s.seating[drag.id].tableId]?.name}` : 'in the lounge'}
+            onPointerDown={() => {}}
+            onKeyDown={() => {}}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VenueFeatureView(props: {
+  feature: VenueFeature
+  dimensions: VenueDimensions
+  selected: boolean
+  overlaps: string[]
+  active: 'feature' | 'resize-feature' | 'rotate-feature' | null
+  onPointerDown: (e: React.PointerEvent) => void
+  onResizePointerDown: (e: React.PointerEvent) => void
+  onRotatePointerDown: (e: React.PointerEvent) => void
+  onKeyDown: (e: React.KeyboardEvent) => void
+  onResizeKeyDown: (e: React.KeyboardEvent) => void
+  onRotate: () => void
+}) {
+  const { feature, active } = props
+  const measured = feetSize(feature.w, feature.h, props.dimensions)
+  const micro = feature.w < 92 || feature.h < 50
+  const compact = micro || feature.w < 165 || feature.h < 82
+  const horizontal = !micro && feature.w >= 135 && feature.h < 78
+  const densityClass = `${compact ? ' compact' : ''}${micro ? ' micro' : ''}${horizontal ? ' horizontal-content' : ''}`
+  return (
+    <div
+      className={`venue-feature venue-feature-${feature.id}${densityClass}${props.selected ? ' selected' : ''}${props.overlaps.length ? ' overlapping' : ''}${active ? ` ${active === 'feature' ? 'dragging' : active === 'rotate-feature' ? 'rotating' : 'resizing'}` : ''}`}
+      style={{ left: feature.x, top: feature.y, width: feature.w, height: feature.h, transform: `rotate(${feature.rotation ?? 0}deg)` }}
+      role="group"
+      aria-label={`${feature.label}, ${formatFeet(measured.w)} by ${formatFeet(measured.h)}${props.overlaps.length ? `, overlaps ${props.overlaps.join(', ')}` : ''}`}
+    >
+      <button
+        type="button"
+        className="feature-move-surface"
+        aria-label={`Move ${feature.label}. Drag or use arrow keys; hold Shift for fine movement.`}
+        onPointerDown={props.onPointerDown}
+        onKeyDown={props.onKeyDown}
+      >
+        {feature.id === 'band' && (
+          <>
+            <span className="speaker speaker-left" aria-hidden="true" />
+            <span className="speaker speaker-right" aria-hidden="true" />
+          </>
+        )}
+        <span className="feature-glyph" aria-hidden="true">{FEATURE_GLYPHS[feature.id]}</span>
+        <span className="zone-label">{compact ? FEATURE_SHORT_LABELS[feature.id] : feature.label}</span>
+        <span className="move-hint" aria-hidden="true">drag to move</span>
+      </button>
+      <button
+        type="button"
+        className="resize-handle"
+        aria-label={`Resize ${feature.label}. Drag, or use left and right arrows for width and up and down arrows for height.`}
+        onPointerDown={props.onResizePointerDown}
+        onKeyDown={props.onResizeKeyDown}
+      >
+        <span aria-hidden="true">↘</span>
+      </button>
+      <button
+        type="button"
+        className="rotate-handle"
+        aria-label={`Rotate ${feature.label}. Drag to rotate in 15 degree steps; hold Alt for free rotation. Current rotation ${Math.round(feature.rotation ?? 0)} degrees.`}
+        onPointerDown={props.onRotatePointerDown}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (e.detail === 0) props.onRotate()
+        }}
+      >
+        <span aria-hidden="true">↻</span>
+      </button>
+      <span className="size-readout" aria-hidden="true">
+        {formatFeet(measured.w)} × {formatFeet(measured.h)} · {Math.round(feature.rotation ?? 0)}°
+      </span>
+      {props.overlaps.length > 0 && <span className="collision-badge" title={`Overlaps ${props.overlaps.join(', ')}`}>!</span>}
     </div>
   )
 }
@@ -445,42 +1068,68 @@ function TableView(props: {
   badge?: number
   touchedAt?: number
   selected: boolean
+  layoutSelected: boolean
+  overlaps: string[]
   dropTarget: boolean
   dragging: boolean
+  rotating: boolean
   onPointerDown: (e: React.PointerEvent) => void
+  onRotatePointerDown: (e: React.PointerEvent) => void
+  onRotate: () => void
   onKeyDown: (e: React.KeyboardEvent) => void
 }) {
-  const { table, size, occupied, badge, touchedAt, selected, dropTarget, dragging } = props
+  const { table, size, occupied, badge, touchedAt, selected, layoutSelected, dropTarget, dragging, rotating } = props
   const flashing = touchedAt !== undefined && Date.now() - touchedAt < 4000
 
-  const cls = ['table', table.shape, selected && 'selected', dropTarget && 'drop-target']
+  const cls = ['table', table.shape, (selected || layoutSelected) && 'selected', props.overlaps.length && 'overlapping', dropTarget && 'drop-target']
     .filter(Boolean)
     .join(' ')
 
   return (
     <div
-      className={cls}
+      className={`table-wrap${selected || layoutSelected ? ' selected' : ''}${rotating ? ' rotating' : ''}`}
       style={{
-        transform: `translate(${table.x}px, ${table.y}px) translate(-50%, -50%)`,
+        transform: `translate(${table.x}px, ${table.y}px) translate(-50%, -50%) rotate(${table.rotation ?? 0}deg)`,
         width: size.w,
         height: size.h,
-        transition: dragging ? 'box-shadow 150ms ease' : 'transform 500ms ease, box-shadow 150ms ease',
+        transition: dragging || rotating ? 'none' : 'transform 500ms ease',
+      }}
+    >
+      <div
+        className={cls}
+        style={{
+          width: size.w,
+          height: size.h,
         ...(dropTarget
           ? { boxShadow: 'inset 0 0 0 1px rgba(41,36,25,.22), 0 0 0 3px var(--gold-bright), 0 6px 18px rgba(10,16,12,.45)' }
           : {}),
-      }}
-      role="button"
-      tabIndex={0}
-      aria-label={`${table.name} — ${occupied} of ${table.seats} seats filled${badge ? `, ${badge} broken rule${badge === 1 ? '' : 's'}` : ''}. Press Enter to edit.`}
-      onKeyDown={props.onKeyDown}
-      onPointerDown={props.onPointerDown}
-    >
-      <span className="t-name">{table.name}</span>
-      <span className="t-count">
-        {occupied} / {table.seats}
-      </span>
-      {flashing && <span key={touchedAt} className="table-pulse" />}
-      {badge ? <span className="t-badge">{badge}</span> : null}
+        }}
+        role="button"
+        tabIndex={0}
+        aria-label={`${table.name} — ${occupied} of ${table.seats} seats filled${badge ? `, ${badge} broken rule${badge === 1 ? '' : 's'}` : ''}${props.overlaps.length ? `, overlaps ${props.overlaps.join(', ')}` : ''}. Press Enter to edit; press R to rotate.`}
+        onKeyDown={props.onKeyDown}
+        onPointerDown={props.onPointerDown}
+      >
+        <span className="t-name">{table.name}</span>
+        <span className="t-count">
+          {occupied} / {table.seats}
+        </span>
+        {flashing && <span key={touchedAt} className="table-pulse" />}
+        {badge ? <span className="t-badge">{badge}</span> : null}
+        {props.overlaps.length > 0 && <span className="collision-badge" title={`Overlaps ${props.overlaps.join(', ')}`}>!</span>}
+      </div>
+      <button
+        type="button"
+        className="table-rotate-handle"
+        aria-label={`Rotate ${table.name}. Drag to rotate in 15 degree steps; hold Alt for free rotation. Current rotation ${Math.round(table.rotation ?? 0)} degrees.`}
+        onPointerDown={props.onRotatePointerDown}
+        onClick={(event) => {
+          event.stopPropagation()
+          if (event.detail === 0) props.onRotate()
+        }}
+      >
+        <span aria-hidden="true">↻</span>
+      </button>
     </div>
   )
 }

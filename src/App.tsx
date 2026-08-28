@@ -33,7 +33,7 @@ export default function App() {
   return (
     <div className="grid h-screen grid-rows-[auto_minmax(0,1fr)]">
       <Header />
-      <div className="grid min-h-0 grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)]">
+      <div className="grid min-h-0 grid-cols-1 md:grid-cols-[248px_minmax(0,1fr)]">
         <Sidebar />
         <Canvas />
       </div>

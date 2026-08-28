@@ -14,26 +14,68 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--color-pine-950);
+  background:
+    radial-gradient(1100px 720px at 54% 40%, rgba(236, 223, 195, 0.035), transparent 68%),
+    var(--color-pine-900);
 }
+
+.canvas-zoom-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 90;
+  display: grid;
+  grid-template-columns: 30px 54px 30px;
+  overflow: hidden;
+  border: 1px solid rgba(197, 165, 94, 0.32);
+  border-radius: 9px;
+  background: rgba(24, 38, 29, 0.94);
+  box-shadow: 0 7px 20px rgba(4, 9, 6, 0.3);
+}
+
+.canvas-zoom-controls button {
+  height: 30px;
+  border: 0;
+  border-right: 1px solid rgba(197, 165, 94, 0.18);
+  background: transparent;
+  color: rgba(236, 223, 195, 0.84);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.canvas-zoom-controls button:last-child { border-right: 0; }
+.canvas-zoom-controls button:hover:not(:disabled) { background: rgba(197, 165, 94, 0.12); }
+.canvas-zoom-controls button:focus-visible { outline: 2px solid var(--color-gold-bright); outline-offset: -3px; }
+.canvas-zoom-controls button:disabled { opacity: 0.35; cursor: default; }
+.canvas-zoom-controls .zoom-readout { color: rgba(236, 223, 195, 0.58); font-size: 9.5px; letter-spacing: 0.04em; }
 
 .stage {
   position: absolute;
   top: 0;
   left: 0;
   transform-origin: 0 0;
-  background:
-    radial-gradient(1100px 700px at 42% 36%, rgba(236, 223, 195, 0.05), transparent 60%),
-    var(--color-pine-900);
+  background: transparent;
   user-select: none;
 }
 
 .room-frame {
   position: absolute;
-  inset: 14px;
   border: 1px solid rgba(197, 165, 94, 0.42);
-  border-radius: 10px;
+  border-radius: 14px;
   pointer-events: none;
+  background:
+    linear-gradient(rgba(232, 207, 143, 0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(232, 207, 143, 0.022) 1px, transparent 1px),
+    radial-gradient(900px 520px at 42% 34%, rgba(236, 223, 195, 0.055), transparent 64%),
+    linear-gradient(180deg, #21372a, #192d22);
+  background-size:
+    var(--grid-x, 100px) var(--grid-y, 100px),
+    var(--grid-x, 100px) var(--grid-y, 100px),
+    100% 100%,
+    100% 100%;
+  background-repeat: repeat, repeat, no-repeat, no-repeat;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22), inset 0 0 38px rgba(5, 12, 8, 0.18);
 }
 
 .room-frame::after {
@@ -41,75 +83,527 @@
   position: absolute;
   inset: 5px;
   border: 1px solid rgba(197, 165, 94, 0.16);
-  border-radius: 7px;
+  border-radius: 10px;
 }
 
-/* ---- zones ---------------------------------------------------------------- */
-
-.zone {
+.room-caption {
   position: absolute;
-  border-radius: 8px;
+  z-index: 3;
+  transform: translate(-50%, -100%);
+  border: 1px solid rgba(197, 165, 94, 0.24);
+  border-radius: 999px;
+  background: rgba(24, 38, 29, 0.9);
+  padding: 3px 10px;
+  color: rgba(236, 223, 195, 0.58);
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
   pointer-events: none;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding-bottom: 8px;
 }
 
-.zone .zone-label {
+.scale-bar {
+  position: absolute;
+  z-index: 3;
+  height: 7px;
+  border-top: 1px solid rgba(236, 223, 195, 0.38);
+  border-right: 1px solid rgba(236, 223, 195, 0.38);
+  border-left: 1px solid rgba(236, 223, 195, 0.38);
+  color: rgba(236, 223, 195, 0.48);
+  pointer-events: none;
+}
+
+.scale-bar span {
+  position: absolute;
+  right: 0;
+  top: 7px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.alignment-guide {
+  position: absolute;
+  z-index: 42;
+  display: block;
+  background: rgba(92, 206, 192, 0.86);
+  box-shadow: 0 0 8px rgba(92, 206, 192, 0.28);
+  pointer-events: none;
+}
+
+.alignment-guide.vertical { width: 1px; }
+.alignment-guide.horizontal { height: 1px; }
+
+.selection-status {
+  position: absolute;
+  z-index: 43;
+  transform: translateX(-50%);
+  border: 1px solid rgba(92, 206, 192, 0.32);
+  border-radius: 999px;
+  background: rgba(18, 37, 33, 0.94);
+  padding: 3px 9px;
+  color: rgba(174, 234, 225, 0.88);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+/* ---- venue floor and movable amenities ------------------------------------ */
+
+.venue-feature {
+  position: absolute;
+  z-index: 4;
+  border-radius: 10px;
+  touch-action: none;
+  color: rgba(232, 207, 143, 0.84);
+  /* Geometry eases so agent-driven placement glides like the tables do;
+     live human drags/resizes suspend it below to stay 1:1 with the pointer. */
+  transition:
+    left 500ms ease, top 500ms ease, width 500ms ease, height 500ms ease, transform 500ms ease,
+    box-shadow 150ms ease, border-color 150ms ease, filter 150ms ease;
+}
+
+.venue-feature.dragging,
+.venue-feature.resizing,
+.venue-feature.rotating {
+  transition: box-shadow 150ms ease, border-color 150ms ease, filter 150ms ease;
+}
+
+.feature-move-surface {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  cursor: grab;
+  font: inherit;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 10px;
+  touch-action: none;
+}
+
+.venue-feature:hover {
+  border-color: rgba(232, 207, 143, 0.75);
+  filter: brightness(1.12);
+}
+
+.venue-feature.dragging,
+.venue-feature.resizing {
+  z-index: 44;
+  box-shadow: 0 12px 28px rgba(5, 9, 6, 0.45), 0 0 0 3px rgba(232, 207, 143, 0.16);
+}
+
+.venue-feature.selected {
+  box-shadow: 0 0 0 2px rgba(232, 207, 143, 0.88), 0 8px 20px rgba(5, 9, 6, 0.35);
+}
+
+.venue-feature.dragging .feature-move-surface,
+.venue-feature.resizing .resize-handle,
+.venue-feature.rotating .rotate-handle {
+  cursor: grabbing;
+}
+
+.feature-move-surface:focus-visible,
+.resize-handle:focus-visible,
+.rotate-handle:focus-visible {
+  outline: 2px solid var(--color-gold-bright);
+  outline-offset: 3px;
+}
+
+.venue-feature .zone-label {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
   font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: 0.32em;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.23em;
   text-transform: uppercase;
-  color: rgba(232, 207, 143, 0.85);
-  text-indent: 0.32em;
+  text-indent: 0.23em;
+  text-align: center;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.zone-dance_floor {
-  border: 1px solid rgba(197, 165, 94, 0.5);
-  background:
-    repeating-linear-gradient(45deg, rgba(197, 165, 94, 0.13) 0 2px, transparent 2px 17px),
-    repeating-linear-gradient(-45deg, rgba(197, 165, 94, 0.13) 0 2px, transparent 2px 17px);
+.feature-glyph {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 1;
+  color: rgba(232, 207, 143, 0.68);
 }
 
-.zone-band {
-  border: 1px dashed rgba(197, 165, 94, 0.45);
-  background: rgba(197, 165, 94, 0.05);
-  flex-direction: column;
-  gap: 2px;
+.venue-feature.compact .feature-move-surface {
+  gap: 3px;
+  padding: 6px;
 }
 
-.zone-band .glyphs {
-  font-size: 17px;
-  color: rgba(232, 207, 143, 0.6);
-  letter-spacing: 0.5em;
-  text-indent: 0.5em;
+.venue-feature.compact .zone-label {
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
 }
 
-.zone-entrance {
-  border: 1px dashed rgba(236, 223, 195, 0.35);
-  background: rgba(236, 223, 195, 0.04);
+.venue-feature.compact .feature-glyph {
+  font-size: 16px;
 }
 
-.zone-entrance .zone-label {
-  color: rgba(236, 223, 195, 0.6);
+.venue-feature.compact .speaker {
+  bottom: 8px;
+  height: 32px;
+  opacity: 0.28;
 }
 
-/* ---- the lounge tray ------------------------------------------------------ */
+.venue-feature.horizontal-content .feature-move-surface {
+  flex-direction: row;
+  gap: 7px;
+  padding-inline: 10px;
+}
 
-.tray {
+.venue-feature.micro .feature-move-surface {
+  padding: 4px;
+}
+
+.venue-feature.micro .zone-label,
+.venue-feature.micro .move-hint,
+.venue-feature.micro .speaker {
+  display: none;
+}
+
+.venue-feature.micro .feature-glyph {
+  font-size: 18px;
+}
+
+.move-hint {
   position: absolute;
-  border: 1.5px dashed rgba(236, 223, 195, 0.28);
-  border-radius: 12px;
+  top: calc(100% + 5px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 1px solid rgba(197, 165, 94, 0.35);
+  border-radius: 999px;
+  background: rgba(20, 31, 24, 0.92);
+  padding: 2px 7px;
+  color: rgba(236, 223, 195, 0.65);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.venue-feature:hover .move-hint,
+.feature-move-surface:focus-visible .move-hint,
+.venue-feature.dragging .move-hint {
+  opacity: 1;
+}
+
+.resize-handle {
+  position: absolute;
+  right: -8px;
+  bottom: -8px;
+  z-index: 8;
+  display: flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(232, 207, 143, 0.74);
+  border-radius: 7px;
+  background: #223329;
+  color: var(--color-gold-bright);
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: 0 3px 9px rgba(5, 9, 6, 0.5);
+  cursor: nwse-resize;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+  touch-action: none;
+}
+
+.venue-feature:hover .resize-handle,
+.resize-handle:focus-visible,
+.venue-feature.resizing .resize-handle {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1.06);
+}
+
+.rotate-handle {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 8;
+  display: flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(232, 207, 143, 0.74);
+  border-radius: 999px;
+  background: #223329;
+  color: var(--color-gold-bright);
+  font-size: 14px;
+  line-height: 1;
+  box-shadow: 0 3px 9px rgba(5, 9, 6, 0.5);
+  cursor: grab;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.venue-feature:hover .rotate-handle,
+.rotate-handle:focus-visible,
+.venue-feature.dragging .rotate-handle,
+.venue-feature.rotating .rotate-handle {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1.06);
+}
+
+.size-readout {
+  position: absolute;
+  right: 19px;
+  bottom: -5px;
+  z-index: 7;
+  border-radius: 999px;
+  background: rgba(20, 31, 24, 0.94);
+  padding: 2px 7px;
+  color: rgba(236, 223, 195, 0.66);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.venue-feature:hover .size-readout,
+.venue-feature.resizing .size-readout,
+.resize-handle:focus-visible + .size-readout {
+  opacity: 1;
+}
+
+.venue-feature.overlapping {
+  border-color: rgba(235, 106, 86, 0.95);
+  box-shadow: 0 0 0 2px rgba(235, 106, 86, 0.58), 0 0 22px rgba(235, 106, 86, 0.2);
+}
+
+.collision-badge {
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  z-index: 12;
+  display: flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #f7ead8;
+  border-radius: 999px;
+  background: var(--color-brick);
+  color: white;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 3px 8px rgba(5, 9, 6, 0.48);
   pointer-events: none;
 }
 
-.tray .tray-label {
+.venue-feature-dance_floor {
+  border: 1px solid rgba(197, 165, 94, 0.5);
+  background:
+    linear-gradient(45deg, rgba(197, 165, 94, 0.14) 25%, transparent 25%, transparent 75%, rgba(197, 165, 94, 0.14) 75%),
+    linear-gradient(45deg, rgba(197, 165, 94, 0.14) 25%, transparent 25%, transparent 75%, rgba(197, 165, 94, 0.14) 75%),
+    rgba(197, 165, 94, 0.035);
+  background-position: 0 0, 14px 14px;
+  background-size: 28px 28px;
+}
+
+.venue-feature-dance_floor .feature-glyph {
+  font-size: 30px;
+}
+
+.venue-feature-band {
+  border: 1px dashed rgba(197, 165, 94, 0.45);
+  background: linear-gradient(to bottom, rgba(197, 165, 94, 0.1), rgba(197, 165, 94, 0.035));
+  box-shadow: inset 0 -7px rgba(197, 165, 94, 0.07);
+}
+
+.speaker {
   position: absolute;
-  top: 7px;
-  left: 14px;
+  bottom: 18px;
+  width: 15px;
+  height: 48px;
+  border: 1px solid rgba(232, 207, 143, 0.32);
+  border-radius: 3px;
+  background: radial-gradient(circle at 50% 70%, rgba(232, 207, 143, 0.26) 0 4px, transparent 5px), #17231b;
+}
+
+.speaker-left { left: 16px; }
+.speaker-right { right: 16px; }
+
+.venue-feature-entrance {
+  border: 1px dashed rgba(236, 223, 195, 0.35);
+  background:
+    linear-gradient(90deg, rgba(236, 223, 195, 0.08) 0 5px, transparent 5px calc(100% - 5px), rgba(236, 223, 195, 0.08) calc(100% - 5px));
+}
+
+.venue-feature-bathroom,
+.venue-feature-photo_booth,
+.venue-feature-bar,
+.venue-feature-buffet,
+.venue-feature-cake_table,
+.venue-feature-gift_table {
+  border: 1px solid rgba(143, 160, 138, 0.4);
+  background: rgba(143, 160, 138, 0.07);
+  color: rgba(236, 223, 195, 0.7);
+}
+
+.venue-feature-bathroom .feature-glyph {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.venue-feature-photo_booth {
+  background:
+    radial-gradient(circle at 50% 38%, rgba(232, 207, 143, 0.2) 0 7px, transparent 8px),
+    rgba(143, 160, 138, 0.07);
+}
+
+.venue-feature-bar {
+  background:
+    linear-gradient(to bottom, transparent 0 58%, rgba(197, 165, 94, 0.13) 58% 66%, transparent 66%),
+    rgba(143, 160, 138, 0.07);
+}
+
+.venue-feature-buffet {
+  background:
+    radial-gradient(circle, rgba(232, 207, 143, 0.18) 0 3px, transparent 4px) 14px 12px / 32px 32px,
+    rgba(143, 160, 138, 0.07);
+}
+
+.venue-feature-cake_table {
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(232, 207, 143, 0.12) 0 28%, transparent 29%), rgba(143, 160, 138, 0.07);
+}
+
+.venue-feature-gift_table {
+  background:
+    linear-gradient(45deg, transparent 46%, rgba(232, 207, 143, 0.12) 47% 53%, transparent 54%),
+    rgba(143, 160, 138, 0.07);
+}
+
+/* ---- the lounge -------------------------------------------------------------
+   A fixed footer docked to the bottom of the canvas — a sibling of .stage,
+   not a child, so it never inherits the room's zoom transform. Its own size
+   and position are plain CSS, unaffected by zooming in or out. */
+
+.lounge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid rgba(236, 223, 195, 0.18);
+  background: linear-gradient(180deg, rgba(23, 27, 24, 0.94), rgba(15, 18, 16, 0.98));
+  transition: height 180ms ease;
+}
+
+.lounge.resizing {
+  transition: none;
+}
+
+.lounge.drop-target {
+  border-top-color: var(--color-gold-bright);
+  box-shadow: inset 0 0 0 3px rgba(232, 207, 143, 0.18);
+}
+
+/* The draggable strip along the lounge's top edge — grab it to resize. */
+.lounge-resize-handle {
+  position: absolute;
+  top: -5px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  cursor: row-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.lounge-resize-handle.disabled {
+  cursor: default;
+}
+
+.lounge-resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 3px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(236, 223, 195, 0.22);
+  transition: background 120ms ease;
+}
+
+.lounge-resize-handle:hover::after,
+.lounge-resize-handle:focus-visible::after {
+  background: var(--color-gold-bright);
+}
+
+.lounge-resize-handle.disabled::after {
+  background: transparent;
+}
+
+.lounge-header {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px 14px 0;
+}
+
+.lounge-collapse-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.lounge-chevron {
+  width: 13px;
+  height: 13px;
+  color: rgba(236, 223, 195, 0.5);
+  transition: transform 150ms ease;
+}
+
+.lounge-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.lounge-label {
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.18em;
@@ -117,17 +611,53 @@
   color: rgba(236, 223, 195, 0.55);
 }
 
-.tray.drop-target {
-  border-color: var(--color-gold-bright);
-  box-shadow: 0 0 0 3px rgba(232, 207, 143, 0.18);
+.lounge-meta {
+  color: rgba(236, 223, 195, 0.38);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.lounge-chips {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 12px 14px;
+  padding: 10px 14px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.lounge-empty {
+  color: rgba(236, 223, 195, 0.4);
+  font-size: 11px;
+}
+
+/* The one chip currently being dragged, rendered above both the stage and
+   the lounge so it never disappears under the lounge's background while
+   crossing the boundary between the two. */
+.drag-ghost-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 46;
+  transform-origin: 0 0;
+  pointer-events: none;
 }
 
 /* ---- tables --------------------------------------------------------------- */
 
-.table {
+.table-wrap {
   position: absolute;
-  left: 0;
   top: 0;
+  left: 0;
+  z-index: 5;
+  transform-origin: 50% 50%;
+}
+
+.table {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -141,6 +671,41 @@
   cursor: grab;
   transition: box-shadow 150ms ease;
 }
+
+.table-rotate-handle {
+  position: absolute;
+  top: -11px;
+  right: -11px;
+  z-index: 9;
+  display: flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(232, 207, 143, 0.72);
+  border-radius: 999px;
+  background: #223329;
+  color: var(--color-gold-bright);
+  font-size: 14px;
+  line-height: 1;
+  box-shadow: 0 3px 9px rgba(5, 9, 6, 0.45);
+  cursor: grab;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.table-wrap:hover .table-rotate-handle,
+.table-wrap.selected .table-rotate-handle,
+.table-wrap.rotating .table-rotate-handle,
+.table-rotate-handle:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1.06);
+}
+
+.table-wrap.rotating .table-rotate-handle { cursor: grabbing; }
+.table-rotate-handle:focus-visible { outline: 2px solid var(--color-gold-bright); outline-offset: 3px; }
 
 .table:active {
   cursor: grabbing;
@@ -177,6 +742,15 @@
   box-shadow:
     inset 0 0 0 1px rgba(41, 36, 25, 0.22),
     0 0 0 2.5px var(--color-gold-bright),
+    0 6px 18px rgba(10, 16, 12, 0.45);
+}
+
+.table.overlapping,
+.table.selected.overlapping {
+  box-shadow:
+    inset 0 0 0 1px rgba(41, 36, 25, 0.22),
+    0 0 0 3px rgba(235, 106, 86, 0.88),
+    0 0 24px rgba(235, 106, 86, 0.3),
     0 6px 18px rgba(10, 16, 12, 0.45);
 }
 
@@ -260,6 +834,14 @@
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.55);
 }
 
+/* A resting chip in the lounge — a plain flex item, not stage-positioned. */
+.chip.flow {
+  position: relative;
+  left: auto;
+  top: auto;
+  margin: 0;
+}
+
 .chip.selected {
   box-shadow:
     0 0 0 2.5px var(--color-gold-bright),
@@ -334,6 +916,34 @@
   animation: tag-flash 2.6s ease-out forwards;
 }
 
+/* A lounge chip's nametag, portalled to the body so the lounge's own
+   vertical scrolling can never clip it off. Positioned in real viewport
+   pixels from the chip's measured rect (see Chip in Canvas.tsx). */
+.nametag-portal {
+  position: fixed;
+  z-index: 90;
+  transform: translate(-50%, calc(-100% - 7px));
+  background: rgba(20, 31, 24, 0.96);
+  color: var(--color-linen);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(197, 165, 94, 0.5);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: nametag-portal-in 120ms ease;
+}
+
+@keyframes nametag-portal-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes tag-flash {
   0%,
   72% {
@@ -380,48 +990,90 @@
   }
 }
 
-/* ---- overlays: legend, banner, hint, ribbon -------------------------------- */
+/* ---- the agent's ghost cursor ---------------------------------------------- */
 
-.legend {
+.agent-cursor {
   position: absolute;
-  top: 24px;
-  left: 30px;
-  right: 240px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
+  left: 0;
+  top: 0;
+  z-index: 60;
   pointer-events: none;
-  z-index: 5;
+  transform-origin: 3px 3px;
+  will-change: transform;
+  filter: drop-shadow(0 3px 7px rgba(5, 9, 6, 0.55));
 }
 
-.legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.agent-cursor-pointer {
+  display: block;
+  fill: var(--color-gold-bright);
+  stroke: rgba(20, 31, 24, 0.9);
+  transition: transform 160ms ease;
+  transform-origin: 3px 3px;
+}
+
+.agent-cursor.carrying .agent-cursor-pointer {
+  transform: scale(0.86) rotate(-8deg);
+}
+
+.agent-cursor-tag {
+  position: absolute;
+  left: 15px;
+  top: 21px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #efd89a, var(--color-gold-bright));
+  border: 1px solid rgba(20, 31, 24, 0.55);
+  padding: 2px 8px;
+  color: #241d10;
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(236, 223, 195, 0.62);
   white-space: nowrap;
 }
 
-.legend-swatch {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex: none;
+.agent-cursor-bubble {
+  position: absolute;
+  left: 15px;
+  top: 44px;
+  border-radius: 999px;
+  background: rgba(20, 31, 24, 0.93);
+  border: 1px solid rgba(232, 207, 143, 0.6);
+  padding: 3px 10px;
+  color: var(--color-linen);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.legend-line {
-  width: 18px;
-  border-top: 2px dashed var(--color-brick);
-  flex: none;
+.agent-ripple {
+  position: absolute;
+  z-index: 39;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: agent-ripple 700ms ease-out forwards;
 }
+
+@keyframes agent-ripple {
+  0% {
+    box-shadow:
+      0 0 0 0 rgba(232, 207, 143, 0.65),
+      0 0 14px 4px rgba(232, 207, 143, 0.3);
+  }
+  100% {
+    box-shadow:
+      0 0 0 30px rgba(232, 207, 143, 0),
+      0 0 4px 1px rgba(232, 207, 143, 0);
+  }
+}
+
+/* ---- overlays: banner, hint, ribbon ----------------------------------------- */
 
 .viol-banner {
   position: absolute;
-  top: 58px;
+  top: 86px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 45;
@@ -443,25 +1095,6 @@
 .viol-banner:hover {
   transform: translateX(-50%) translateY(-1px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-
-.canvas-hint {
-  position: absolute;
-  left: 50%;
-  bottom: 152px;
-  transform: translateX(-50%);
-  background: rgba(20, 31, 24, 0.88);
-  border: 1px solid rgba(197, 165, 94, 0.45);
-  color: var(--color-linen);
-  font-size: 12.5px;
-  padding: 7px 16px;
-  border-radius: 999px;
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-.canvas-hint .spark {
-  color: var(--color-gold-bright);
 }
 
 .ribbon {
@@ -517,14 +1150,21 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chip {
+  .chip,
+  .venue-feature {
     transition: none;
   }
 
   .pulse-ring,
   .table-pulse,
   .nametag.flash,
-  .viol-lines path {
+  .viol-lines path,
+  .agent-ripple {
     animation: none;
+  }
+
+  /* The choreographer already skips queuing under reduced motion; this is the belt to that suspender. */
+  .agent-cursor {
+    display: none;
   }
 }

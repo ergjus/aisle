@@ -1,10 +1,12 @@
 import { getCore, occupantsOf, useStore } from '../store'
-import type { AisleState, Guest, RSVP, Table, ZoneId } from '../types'
+import type { AisleState, Guest, RSVP, Table, VenueFeatureId, ZoneId } from '../types'
+import { ROOM, featureMinSize, feetSize, formatFeet, roomRect, stageUnitsPerFoot, tableBodyBounds } from '../geometry'
 import { computeViolations, constraintStatus, constraintText, dramaLabel, dramaScore } from '../constraints'
 import { autoArrange } from '../solver'
 import { SAMPLE } from '../sample'
 import { parseGuestEntries } from '../utils'
 import { syncTools, webmcpAvailable, type WebTool } from './adapter'
+import { choreograph, glance } from '../agentCursor'
 
 // ---- result helpers --------------------------------------------------------
 
@@ -84,11 +86,27 @@ function roomSummary(state: AisleState): string {
   lines.push(
     `${state.guestOrder.length} guests (${attending.length} attending) · ${state.tableOrder.length} tables, ${seats} seats · ${seated.length} seated, ${attending.length - seated.length} unseated · ${violations.length} violations · drama: ${dramaLabel(drama)}${state.finalized ? ' · FINALIZED' : ''}`,
   )
+  lines.push(
+    `Room: ${formatFeet(state.venueDimensions.widthFt)} × ${formatFeet(state.venueDimensions.lengthFt)} · ${state.venueDimensions.snapFt > 0 ? `${formatFeet(state.venueDimensions.snapFt)} snap grid` : 'snapping off'}`,
+  )
+  const units = stageUnitsPerFoot(state.venueDimensions)
+  const room = roomRect(state.venueDimensions)
+  lines.push(
+    `Venue: ${Object.values(state.venue)
+      .map((feature) => {
+        if (!feature.enabled) return `${feature.label} hidden`
+        const size = feetSize(feature.w, feature.h, state.venueDimensions)
+        const x = (feature.x - room.x) / units.x
+        const y = (feature.y - room.y) / units.y
+        return `${feature.label} shown at (${formatFeet(x)}, ${formatFeet(y)}), ${formatFeet(size.w)} × ${formatFeet(size.h)}, rotated ${Math.round(feature.rotation)}°`
+      })
+      .join(' · ')}`,
+  )
   for (const tid of state.tableOrder) {
     const t = state.tables[tid]
     const occ = occupantsOf(state, tid)
     lines.push(
-      `${t.name} (${t.shape}, ${occ.length}/${t.seats}): ${occ.map((g) => state.guests[g]?.name).join(', ') || 'empty'}`,
+      `${t.name} (${t.shape}, ${occ.length}/${t.seats}, center ${formatFeet((t.x - room.x) / units.x)}, ${formatFeet((t.y - room.y) / units.y)}, rotated ${Math.round(t.rotation)}°): ${occ.map((g) => state.guests[g]?.name).join(', ') || 'empty'}`,
     )
   }
   const unseated = attending.filter((id) => !state.seating[id])
@@ -119,6 +137,33 @@ const CONSTRAINT_TYPES = [
   'far_from_entrance',
 ] as const
 
+const VENUE_FEATURE_IDS: VenueFeatureId[] = [
+  'entrance', 'dance_floor', 'band', 'bathroom', 'photo_booth', 'bar', 'buffet', 'cake_table', 'gift_table',
+]
+const VENUE_LOCATIONS = [
+  'top_left', 'top_center', 'top_right',
+  'center_left', 'center', 'center_right',
+  'bottom_left', 'bottom_center', 'bottom_right',
+] as const
+
+function featurePosition(feature: AisleState['venue'][VenueFeatureId], location: string, dimensions: AisleState['venueDimensions']) {
+  const room = roomRect(dimensions)
+  const [vertical, horizontal] = location === 'center'
+    ? ['center', 'center']
+    : location.split('_')
+  const x = horizontal === 'left'
+    ? room.x + 34
+    : horizontal === 'right'
+      ? room.x + room.w - feature.w - 34
+      : room.x + (room.w - feature.w) / 2
+  const y = vertical === 'top'
+    ? room.y + 34
+    : vertical === 'bottom'
+      ? room.y + room.h - feature.h - 34
+      : room.y + (room.h - feature.h) / 2
+  return { x, y }
+}
+
 function parseConstraintType(type: string):
   | { kind: 'pair'; pair: 'together' | 'apart' }
   | { kind: 'zone'; zone: ZoneId; preference: 'near' | 'far' }
@@ -135,6 +180,15 @@ function obj(properties: Record<string, unknown>, required: string[] = []) {
 }
 
 const str = (description: string, extra: Record<string, unknown> = {}) => ({ type: 'string', description, ...extra })
+
+/** Bubble text for read-only tools — shown only if the cursor is already on stage. */
+const READ_GLANCES: Record<string, string> = {
+  get_seating_chart: 'Reading the room…',
+  list_guests: 'Reviewing the guest list…',
+  list_constraints: 'Reviewing the rules…',
+  list_unseated: 'Counting empty seats…',
+  list_violations: 'Checking for drama…',
+}
 
 function makeTool(
   name: string,
@@ -161,6 +215,7 @@ function makeTool(
       } else if (rawArgs && typeof rawArgs === 'object') {
         args = rawArgs as Record<string, unknown>
       }
+      const before = getCore()
       let result: HandlerResult
       try {
         result = handler(args)
@@ -169,6 +224,23 @@ function makeTool(
       }
       if (!opts.readOnly || result.isError) {
         useStore.getState().logActivity(name, result.text.split('\n')[0].slice(0, 140), 'agent')
+      }
+      if (!result.isError) {
+        try {
+          if (opts.readOnly) {
+            if (READ_GLANCES[name]) glance(READ_GLANCES[name])
+          } else {
+            choreograph({
+              tool: name,
+              summary: result.text,
+              before,
+              after: getCore(),
+              touched: result.touched ?? [],
+            })
+          }
+        } catch {
+          // Choreography is decoration; a hiccup must never fail the tool call.
+        }
       }
       if (result.touched?.length) useStore.getState().markTouched(result.touched)
       return {
@@ -183,6 +255,90 @@ function makeTool(
 
 function baseTools(): WebTool[] {
   return [
+    makeTool(
+      'update_venue',
+      'Configure the shared venue floor plan. Show, hide, place, resize, and rotate the entrance, dance floor, band & speakers, restrooms, photo booth, bar, buffet & catering, cake table, or gifts & cards table. Prefer the real-world *_ft fields, measured from the room’s top-left; legacy x/y/width/height floor-plan units remain supported. The human sees the same saved layout and can adjust it afterward.',
+      obj(
+        {
+          feature: str('Venue amenity to change', { enum: VENUE_FEATURE_IDS }),
+          enabled: { type: 'boolean', description: 'Whether this amenity is present and visible' },
+          location: str('Named part of the room', { enum: [...VENUE_LOCATIONS] }),
+          x_ft: { type: 'number', minimum: 0, maximum: 300, description: 'Amenity left edge in feet from the room’s left wall (preferred)' },
+          y_ft: { type: 'number', minimum: 0, maximum: 200, description: 'Amenity top edge in feet from the room’s top wall (preferred)' },
+          width_ft: { type: 'number', minimum: 1, maximum: 300, description: 'Amenity width in feet (preferred)' },
+          height_ft: { type: 'number', minimum: 1, maximum: 200, description: 'Amenity height in feet (preferred)' },
+          rotation: { type: 'number', minimum: -360, maximum: 360, description: 'Clockwise rotation in degrees' },
+          x: { type: 'number', minimum: 0, maximum: ROOM.w, description: 'Legacy horizontal floor-plan position from the room’s left edge' },
+          y: { type: 'number', minimum: 0, maximum: ROOM.h, description: 'Legacy vertical floor-plan position from the room’s top edge' },
+          width: { type: 'number', minimum: 1, maximum: ROOM.w, description: 'Legacy amenity width in floor-plan units' },
+          height: { type: 'number', minimum: 1, maximum: ROOM.h, description: 'Legacy amenity height in floor-plan units' },
+        },
+        ['feature'],
+      ),
+      (args) => {
+        const id = String(args.feature ?? '') as VenueFeatureId
+        if (!VENUE_FEATURE_IDS.includes(id)) return fail(`Unknown venue feature. Use one of: ${VENUE_FEATURE_IDS.join(', ')}.`)
+        const state = getCore()
+        const feature = state.venue[id]
+        const patch: Partial<typeof feature> = {}
+        const min = featureMinSize(id, state.venueDimensions)
+        const units = stageUnitsPerFoot(state.venueDimensions)
+        const room = roomRect(state.venueDimensions)
+        if (typeof args.enabled === 'boolean') patch.enabled = args.enabled
+        const requestedWidth = typeof args.width_ft === 'number' ? args.width_ft * units.x : args.width
+        const requestedHeight = typeof args.height_ft === 'number' ? args.height_ft * units.y : args.height
+        if (typeof requestedWidth === 'number') patch.w = Math.max(min.w, Math.min(room.w - 16, requestedWidth))
+        if (typeof requestedHeight === 'number') patch.h = Math.max(min.h, Math.min(room.h - 16, requestedHeight))
+        if (typeof args.rotation === 'number') patch.rotation = ((args.rotation % 360) + 360) % 360
+        const proposed = { ...feature, ...patch }
+        if (args.location) {
+          if (!VENUE_LOCATIONS.includes(String(args.location) as (typeof VENUE_LOCATIONS)[number])) {
+            return fail(`Unknown location. Use one of: ${VENUE_LOCATIONS.join(', ')}.`)
+          }
+          Object.assign(patch, featurePosition(proposed, String(args.location), state.venueDimensions))
+        }
+        const width = patch.w ?? feature.w
+        const height = patch.h ?? feature.h
+        const requestedX = typeof args.x_ft === 'number' ? args.x_ft * units.x : args.x
+        const requestedY = typeof args.y_ft === 'number' ? args.y_ft * units.y : args.y
+        if (typeof requestedX === 'number') patch.x = Math.max(room.x + 8, Math.min(room.x + room.w - width - 8, room.x + requestedX))
+        if (typeof requestedY === 'number') patch.y = Math.max(room.y + 8, Math.min(room.y + room.h - height - 8, room.y + requestedY))
+        const x = patch.x ?? feature.x
+        const y = patch.y ?? feature.y
+        if (patch.w !== undefined) patch.w = Math.min(patch.w, room.x + room.w - x - 8)
+        if (patch.h !== undefined) patch.h = Math.min(patch.h, room.y + room.h - y - 8)
+        if (Object.keys(patch).length === 0) return fail('Give enabled, a named location, position, size, or rotation to change the venue.')
+        useStore.getState().updateVenueFeature(id, patch)
+        const after = getCore().venue[id]
+        const afterSize = feetSize(after.w, after.h, getCore().venueDimensions)
+        return ok(
+          `${after.label} is ${after.enabled ? `shown at (${formatFeet((after.x - room.x) / units.x)}, ${formatFeet((after.y - room.y) / units.y)}), sized ${formatFeet(afterSize.w)} × ${formatFeet(afterSize.h)}, rotated ${Math.round(after.rotation)}°` : 'hidden'}.`,
+          [id],
+        )
+      },
+    ),
+    makeTool(
+      'update_venue_dimensions',
+      'Set the real-world venue room width and length in feet, plus the movement snap grid. This calibrates the shared floor plan so amenity sizes and positions are reported in real measurements.',
+      obj({
+        width_ft: { type: 'number', minimum: 20, maximum: 300, description: 'Inside room width in feet' },
+        length_ft: { type: 'number', minimum: 15, maximum: 200, description: 'Inside room length in feet' },
+        snap_ft: { type: 'number', minimum: 0, maximum: 10, description: 'Grid spacing in feet; use 0 to turn grid snapping off' },
+      }),
+      (args) => {
+        const patch: Partial<AisleState['venueDimensions']> = {}
+        if (typeof args.width_ft === 'number') patch.widthFt = args.width_ft
+        if (typeof args.length_ft === 'number') patch.lengthFt = args.length_ft
+        if (typeof args.snap_ft === 'number') patch.snapFt = args.snap_ft
+        if (Object.keys(patch).length === 0) return fail('Give width_ft, length_ft, or snap_ft to update the room.')
+        useStore.getState().updateVenueDimensions(patch)
+        const dimensions = getCore().venueDimensions
+        return ok(
+          `Room calibrated to ${formatFeet(dimensions.widthFt)} × ${formatFeet(dimensions.lengthFt)} with ${dimensions.snapFt > 0 ? `${formatFeet(dimensions.snapFt)} snapping` : 'snapping off'}.`,
+          ['venue-dimensions'],
+        )
+      },
+    ),
     makeTool(
       'get_seating_chart',
       'Read the full current state of the wedding seating chart: every table with its occupants, unseated guests, all constraints with their status, current violations, and the drama score. Call this before making changes so you are working from the latest state — the human may have dragged guests around since your last call.',
@@ -305,19 +461,51 @@ function baseTools(): WebTool[] {
     ),
     makeTool(
       'add_table',
-      'Add a table to the room. Choose a name, seat count (2–16) and shape (round or rect). It is placed in an open spot; the human can drag it anywhere.',
+      'Add a table to the room. Choose a name, seat count (2–16), shape (round or rect), and optionally where its center goes in real-world feet from the room’s top-left, plus a rotation. Without a position it lands in an open spot; the human can drag or rotate it afterwards.',
       obj({
         name: str('Table name, e.g. "Table 11" or "Head table"; auto-numbered if omitted'),
         seats: { type: 'integer', minimum: 2, maximum: 16, description: 'Number of seats (default 8)' },
         shape: str('Table shape', { enum: ['round', 'rect'] }),
+        x_ft: { type: 'number', minimum: 0, maximum: 300, description: 'Table center in feet from the room’s left wall' },
+        y_ft: { type: 'number', minimum: 0, maximum: 200, description: 'Table center in feet from the room’s top wall' },
+        rotation: { type: 'number', minimum: -360, maximum: 360, description: 'Clockwise rotation in degrees' },
       }),
       (args) => {
-        const table = useStore.getState().addTable({
+        const fields: Partial<Omit<Table, 'id'>> = {
           name: args.name ? String(args.name) : undefined,
           seats: typeof args.seats === 'number' ? args.seats : undefined,
           shape: args.shape === 'rect' ? 'rect' : 'round',
-        })
-        return ok(`Added ${table.name} (${table.shape}, ${table.seats} seats).`, [table.id])
+        }
+        if (typeof args.rotation === 'number') fields.rotation = ((args.rotation % 360) + 360) % 360
+        if (typeof args.x_ft === 'number' || typeof args.y_ft === 'number') {
+          const dimensions = getCore().venueDimensions
+          const units = stageUnitsPerFoot(dimensions)
+          const room = roomRect(dimensions)
+          let x = typeof args.x_ft === 'number' ? room.x + args.x_ft * units.x : room.x + room.w / 2
+          let y = typeof args.y_ft === 'number' ? room.y + args.y_ft * units.y : room.y + room.h / 2
+          const probe: Table = {
+            id: 'probe',
+            name: '',
+            shape: fields.shape ?? 'round',
+            seats: Math.max(2, Math.min(16, fields.seats ?? 8)),
+            rotation: fields.rotation ?? 0,
+            x,
+            y,
+          }
+          const bounds = tableBodyBounds(probe, dimensions)
+          x += Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
+          y += Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+          fields.x = x
+          fields.y = y
+        }
+        const table = useStore.getState().addTable(fields)
+        const dimensions = getCore().venueDimensions
+        const units = stageUnitsPerFoot(dimensions)
+        const room = roomRect(dimensions)
+        return ok(
+          `Added ${table.name} (${table.shape}, ${table.seats} seats), centered at (${formatFeet((table.x - room.x) / units.x)}, ${formatFeet((table.y - room.y) / units.y)})${table.rotation ? `, rotated ${Math.round(table.rotation)}°` : ''}.`,
+          [table.id],
+        )
       },
     ),
     makeTool(
@@ -336,6 +524,9 @@ function baseTools(): WebTool[] {
         const state = getCore()
         const parsed = parseConstraintType(String(args.type ?? ''))
         if (!parsed) return fail(`Unknown constraint type. Use one of: ${CONSTRAINT_TYPES.join(', ')}.`)
+        if (parsed.kind === 'zone' && !state.venue[parsed.zone]?.enabled) {
+          return fail(`${state.venue[parsed.zone].label} is hidden. Show it with update_venue before adding a seating rule around it.`)
+        }
         const ra = resolveGuest(state, args.guest_a)
         if ('err' in ra) return fail(ra.err)
         const note = args.note ? String(args.note) : undefined
@@ -433,13 +624,16 @@ function seatingTools(): WebTool[] {
   return [
     makeTool(
       'update_table',
-      'Rename a table, change its seat count (2–16), or change its shape (round/rect). Shrinking a table below its occupancy politely bumps the extra guests back to the lounge.',
+      'Rename, resize, rotate, or reposition a table using real-world feet from the room’s top-left. Shrinking a table below its occupancy politely bumps the extra guests back to the lounge.',
       obj(
         {
           table: str('Table to change, by name'),
           name: str('New name'),
           seats: { type: 'integer', minimum: 2, maximum: 16, description: 'New seat count' },
           shape: str('New shape', { enum: ['round', 'rect'] }),
+          rotation: { type: 'number', minimum: -360, maximum: 360, description: 'Clockwise rotation in degrees' },
+          x_ft: { type: 'number', minimum: 0, maximum: 300, description: 'Table center in feet from the room’s left wall' },
+          y_ft: { type: 'number', minimum: 0, maximum: 200, description: 'Table center in feet from the room’s top wall' },
         },
         ['table'],
       ),
@@ -447,13 +641,37 @@ function seatingTools(): WebTool[] {
         const state = getCore()
         const r = resolveTable(state, args.table)
         if ('err' in r) return fail(r.err)
-        const { unseated } = useStore.getState().updateTable(r.hit.id, {
+        const tablePatch: Partial<Omit<Table, 'id'>> = {
           ...(args.name ? { name: String(args.name) } : {}),
           ...(typeof args.seats === 'number' ? { seats: args.seats } : {}),
           ...(args.shape === 'round' || args.shape === 'rect' ? { shape: args.shape } : {}),
-        })
-        const after = getCore().tables[r.hit.id]
-        let text = `${r.hit.name} is now "${after.name}" (${after.shape}, ${after.seats} seats).`
+          ...(typeof args.rotation === 'number' ? { rotation: ((args.rotation % 360) + 360) % 360 } : {}),
+        }
+        const hasPosition = typeof args.x_ft === 'number' || typeof args.y_ft === 'number'
+        if (Object.keys(tablePatch).length === 0 && !hasPosition) return fail('Give a new name, seats, shape, rotation, x_ft, or y_ft.')
+        let unseated: string[] = []
+        if (Object.keys(tablePatch).length > 0) {
+          unseated = useStore.getState().updateTable(r.hit.id, tablePatch).unseated
+        } else {
+          useStore.getState().snapshot('move table')
+        }
+        let after = getCore().tables[r.hit.id]
+        if (hasPosition) {
+          const dimensions = getCore().venueDimensions
+          const units = stageUnitsPerFoot(dimensions)
+          const room = roomRect(dimensions)
+          let x = typeof args.x_ft === 'number' ? room.x + args.x_ft * units.x : after.x
+          let y = typeof args.y_ft === 'number' ? room.y + args.y_ft * units.y : after.y
+          const bounds = tableBodyBounds({ ...after, x, y }, dimensions)
+          x += Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
+          y += Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+          useStore.getState().moveTable(r.hit.id, x, y)
+          after = getCore().tables[r.hit.id]
+        }
+        const dimensions = getCore().venueDimensions
+        const units = stageUnitsPerFoot(dimensions)
+        const room = roomRect(dimensions)
+        let text = `${r.hit.name} is now "${after.name}" (${after.shape}, ${after.seats} seats), centered at (${formatFeet((after.x - room.x) / units.x)}, ${formatFeet((after.y - room.y) / units.y)}) and rotated ${Math.round(after.rotation)}°.`
         if (unseated.length) {
           text += ` ${unseated.map((id) => state.guests[id]?.name).join(', ')} lost their seat${unseated.length === 1 ? '' : 's'} and moved to the lounge.`
         }
@@ -646,6 +864,57 @@ export function currentTools(): WebTool[] {
     ...baseTools(),
     ...(flags.hasTables ? seatingTools() : []),
     ...(flags.canFinalize ? finalizeTools() : []),
+  ]
+}
+
+// ---- catalog for the in-app toolbox page ------------------------------------
+
+export interface CatalogParam {
+  name: string
+  description: string
+  required: boolean
+}
+
+export interface CatalogEntry {
+  name: string
+  description: string
+  params: CatalogParam[]
+  readOnly: boolean
+  /** What has to be true of the chart for this tool to be registered. */
+  requires: 'always' | 'tables' | 'perfect'
+  available: boolean
+}
+
+/**
+ * Every tool — including ones currently gated off — with its live availability,
+ * for the human-facing toolbox page. Built from the same definitions the agent
+ * gets, so the page can never drift from reality.
+ */
+export function toolCatalog(): CatalogEntry[] {
+  const flags = toolFlags(getCore())
+  const entry = (tool: WebTool, requires: CatalogEntry['requires'], available: boolean): CatalogEntry => {
+    const schema = tool.inputSchema as {
+      properties?: Record<string, { description?: string; enum?: unknown[] }>
+      required?: string[]
+    }
+    const requiredNames = new Set(schema.required ?? [])
+    return {
+      name: tool.name,
+      description: tool.description,
+      params: Object.entries(schema.properties ?? {}).map(([name, p]) => ({
+        name,
+        description: [p.description, p.enum ? `One of: ${p.enum.join(', ')}` : null].filter(Boolean).join('. '),
+        required: requiredNames.has(name),
+      })),
+      readOnly: tool.annotations?.readOnlyHint === true,
+      requires,
+      available,
+    }
+  }
+  return [
+    ...baseTools().map((t) => entry(t, 'always', true)),
+    ...seatingTools().map((t) => entry(t, 'tables', flags.hasTables)),
+    ...finalizeTools().map((t) => entry(t, 'perfect', flags.canFinalize)),
   ]
 }
 

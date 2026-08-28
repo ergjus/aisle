@@ -16,17 +16,19 @@ const GROUP_PALETTE = [
   '#b3887f', // clay
 ]
 
-/** Stable group → color map, assigned in order of first appearance. */
+/** Stable group → color map, assigned in groupOrder (falls back to first-appearance order). */
 export function groupColors(state: AisleState): Record<string, string> {
   const map: Record<string, string> = {}
   let i = 0
-  for (const id of state.guestOrder) {
-    const g = state.guests[id].group
+  const assign = (g: string) => {
     if (!(g in map)) {
       map[g] = GROUP_PALETTE[i % GROUP_PALETTE.length]
       i++
     }
   }
+  for (const g of state.groupOrder ?? []) assign(g)
+  // Guard against any guest whose group isn't in groupOrder yet.
+  for (const id of state.guestOrder) assign(state.guests[id].group)
   return map
 }
 

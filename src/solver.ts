@@ -38,7 +38,9 @@ function buildCtx(state: AisleState): Ctx {
   const zones: Ctx['zones'] = []
   for (const c of state.constraints) {
     if (c.type === 'zone') {
-      if (att.has(c.guestId)) zones.push({ guestId: c.guestId, zone: c.zone, preference: c.preference, id: c.id })
+      if (att.has(c.guestId) && state.venue[c.zone]?.enabled) {
+        zones.push({ guestId: c.guestId, zone: c.zone, preference: c.preference, id: c.id })
+      }
     } else if (att.has(c.a) && att.has(c.b)) {
       pairs.push({ type: c.type, a: c.a, b: c.b, id: c.id })
     }

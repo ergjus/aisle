@@ -8,8 +8,11 @@ import type {
   SeatAssignment,
   Table,
   TableShape,
+  VenueFeature,
+  VenueFeatureId,
+  VenueDimensions,
 } from './types'
-import { findFreeSpot } from './geometry'
+import { ROOM, featureBounds, findFreeSpot, freshVenue, freshVenueDimensions, roomRect, stageUnitsPerFoot, tableBodyBounds } from './geometry'
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9)
@@ -23,6 +26,7 @@ const MAX_UNDO = 60
 
 function emptyCore(): AisleState {
   return {
+    layoutVersion: 2,
     guests: {},
     guestOrder: [],
     tables: {},
@@ -30,11 +34,15 @@ function emptyCore(): AisleState {
     constraints: [],
     seating: {},
     finalized: false,
+    groupOrder: [],
+    venue: freshVenue(),
+    venueDimensions: freshVenueDimensions(),
   }
 }
 
 function coreOf(s: StoreState): AisleState {
   return {
+    layoutVersion: s.layoutVersion ?? 2,
     guests: s.guests,
     guestOrder: s.guestOrder,
     tables: s.tables,
@@ -42,7 +50,22 @@ function coreOf(s: StoreState): AisleState {
     constraints: s.constraints,
     seating: s.seating,
     finalized: s.finalized,
+    groupOrder: s.groupOrder,
+    venue: s.venue,
+    venueDimensions: s.venueDimensions,
   }
+}
+
+/** Appends `group` to `order` if it isn't already present (exact match). */
+function withGroup(order: string[], group: string): string[] {
+  return order.includes(group) ? order : [...order, group]
+}
+
+/** Backfills groupOrder with any guest groups it's missing, in first-appearance order. */
+function reconcileGroupOrder(s: AisleState): string[] {
+  let order = s.groupOrder ?? []
+  for (const id of s.guestOrder) order = withGroup(order, s.guests[id].group)
+  return order
 }
 
 export interface Selection {
@@ -79,10 +102,21 @@ export interface StoreState extends AisleState {
   removeGuest: (id: string) => void
   importGuests: (entries: { name: string; group?: string; dietary?: string[]; rsvp?: RSVP; notes?: string }[]) => Guest[]
 
+  /** Creates a group with no guests yet (or returns the existing name if one already matches, case-insensitively). */
+  addGroup: (name: string) => string | null
+  /** Removes a group that has no guests in it. No-op otherwise. */
+  removeGroup: (name: string) => void
+
   addTable: (fields?: Partial<Omit<Table, 'id'>>) => Table
-  updateTable: (id: string, patch: Partial<Omit<Table, 'id'>>) => { unseated: string[] }
+  updateTable: (id: string, patch: Partial<Omit<Table, 'id'>>, opts?: { snapshot?: boolean }) => { unseated: string[] }
   removeTable: (id: string) => { unseated: string[] }
   moveTable: (id: string, x: number, y: number, opts?: { snapshot?: boolean }) => void
+  updateVenueFeature: (
+    id: VenueFeatureId,
+    patch: Partial<Omit<VenueFeature, 'id'>>,
+    opts?: { snapshot?: boolean },
+  ) => void
+  updateVenueDimensions: (patch: Partial<VenueDimensions>) => void
 
   addConstraint: (c: DistributiveOmit<Constraint, 'id'> & { id?: string }) => Constraint
   removeConstraint: (id: string) => void
@@ -100,6 +134,7 @@ export interface StoreState extends AisleState {
   setAgentConnected: () => void
   setWebmcp: (available: boolean, toolNames: string[]) => void
   logActivity: (tool: string, summary: string, source?: 'agent' | 'you') => void
+  clearActivity: () => void
   markTouched: (ids: string[]) => void
   setSelection: (sel: Selection | null) => void
   setDraggingGuest: (id: string | null) => void
@@ -111,7 +146,68 @@ function loadPersisted(): AisleState {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return emptyCore()
     const parsed = JSON.parse(raw)
-    return { ...emptyCore(), ...parsed }
+    const sourceLayoutVersion = Number(parsed.layoutVersion ?? 1)
+    const defaults = emptyCore()
+    let merged = {
+      ...defaults,
+      ...parsed,
+      layoutVersion: 2,
+      venue: Object.fromEntries(
+        Object.entries(defaults.venue).map(([id, feature]) => [id, { ...feature, ...(parsed.venue?.[id] ?? {}), rotation: parsed.venue?.[id]?.rotation ?? 0 }]),
+      ) as AisleState['venue'],
+      venueDimensions: { ...defaults.venueDimensions, ...(parsed.venueDimensions ?? {}) },
+      tables: Object.fromEntries(
+        Object.entries(parsed.tables ?? {}).map(([id, table]) => [id, { ...(table as Table), rotation: (table as Table).rotation ?? 0 }]),
+      ),
+    }
+    const dimensions = merged.venueDimensions
+    const room = roomRect(dimensions)
+    const units = stageUnitsPerFoot(dimensions)
+
+    // v1 always stretched rooms into the same abstract rectangle. Reproject
+    // those saved coordinates once so v2 can display the venue's true aspect.
+    if (sourceLayoutVersion < 2) {
+      const oldUnits = { x: ROOM.w / dimensions.widthFt, y: ROOM.h / dimensions.lengthFt }
+      merged = {
+        ...merged,
+        tables: Object.fromEntries(
+          Object.entries(merged.tables as Record<string, Table>).map(([id, table]) => [id, {
+            ...table,
+            x: room.x + ((table.x - ROOM.x) / oldUnits.x) * units.x,
+            y: room.y + ((table.y - ROOM.y) / oldUnits.y) * units.y,
+          }]),
+        ) as AisleState['tables'],
+        venue: Object.fromEntries(
+          Object.entries(merged.venue as Record<VenueFeatureId, VenueFeature>).map(([id, feature]) => [id, {
+            ...feature,
+            x: room.x + ((feature.x - ROOM.x) / oldUnits.x) * units.x,
+            y: room.y + ((feature.y - ROOM.y) / oldUnits.y) * units.y,
+            w: (feature.w / oldUnits.x) * units.x,
+            h: (feature.h / oldUnits.y) * units.y,
+          }]),
+        ) as AisleState['venue'],
+      }
+    }
+
+    // Keep every persisted item recoverable even if a room was made smaller.
+    merged.tables = Object.fromEntries(
+      Object.entries(merged.tables as Record<string, Table>).map(([id, table]) => {
+        const bounds = tableBodyBounds(table, dimensions)
+        const dx = Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
+        const dy = Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+        return [id, { ...table, x: table.x + dx, y: table.y + dy }]
+      }),
+    ) as AisleState['tables']
+    merged.venue = Object.fromEntries(
+      Object.entries(merged.venue as Record<VenueFeatureId, VenueFeature>).map(([id, feature]) => {
+        const resized = { ...feature, w: Math.min(feature.w, room.w - 12), h: Math.min(feature.h, room.h - 12) }
+        const bounds = featureBounds(resized)
+        const dx = Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
+        const dy = Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+        return [id, { ...resized, x: resized.x + dx, y: resized.y + dy }]
+      }),
+    ) as AisleState['venue']
+    return { ...merged, groupOrder: reconcileGroupOrder(merged) }
   } catch {
     return emptyCore()
   }
@@ -197,6 +293,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({
       guests: { ...s.guests, [guest.id]: guest },
       guestOrder: [...s.guestOrder, guest.id],
+      groupOrder: withGroup(s.groupOrder, guest.group),
       finalized: false,
     }))
     return guest
@@ -211,7 +308,12 @@ export const useStore = create<StoreState>((set, get) => ({
       const seating = { ...st.seating }
       // A guest who declined gives up their seat.
       if (next.rsvp === 'no' && seating[id]) delete seating[id]
-      return { guests: { ...st.guests, [id]: next }, seating, finalized: false }
+      return {
+        guests: { ...st.guests, [id]: next },
+        seating,
+        groupOrder: withGroup(st.groupOrder, next.group),
+        finalized: false,
+      }
     })
   },
 
@@ -237,6 +339,25 @@ export const useStore = create<StoreState>((set, get) => ({
     })
   },
 
+  addGroup: (name) => {
+    const trimmed = name.trim()
+    if (!trimmed) return null
+    const s = get()
+    const existing = s.groupOrder.find((g) => g.toLowerCase() === trimmed.toLowerCase())
+    if (existing) return existing
+    s.snapshot('add group')
+    set((st) => ({ groupOrder: [...st.groupOrder, trimmed] }))
+    return trimmed
+  },
+
+  removeGroup: (name) => {
+    const s = get()
+    if (!s.groupOrder.includes(name)) return
+    if (s.guestOrder.some((id) => s.guests[id].group === name)) return
+    s.snapshot('remove group')
+    set((st) => ({ groupOrder: st.groupOrder.filter((g) => g !== name) }))
+  },
+
   importGuests: (entries) => {
     if (entries.length === 0) return []
     get().snapshot('import guests')
@@ -244,6 +365,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       const guests = { ...s.guests }
       const order = [...s.guestOrder]
+      let groupOrder = s.groupOrder
       const existing = new Set(Object.values(s.guests).map((g) => g.name.toLowerCase()))
       for (const e of entries) {
         const name = e.name.trim()
@@ -259,9 +381,10 @@ export const useStore = create<StoreState>((set, get) => ({
         }
         guests[g.id] = g
         order.push(g.id)
+        groupOrder = withGroup(groupOrder, g.group)
         added.push(g)
       }
-      return { guests, guestOrder: order, finalized: false }
+      return { guests, guestOrder: order, groupOrder, finalized: false }
     })
     return added
   },
@@ -279,6 +402,7 @@ export const useStore = create<StoreState>((set, get) => ({
       seats: Math.max(2, Math.min(16, fields.seats ?? 8)),
       x: spot.x,
       y: spot.y,
+      rotation: fields.rotation ?? 0,
     }
     set((st) => ({
       tables: { ...st.tables, [table.id]: table },
@@ -288,19 +412,24 @@ export const useStore = create<StoreState>((set, get) => ({
     return table
   },
 
-  updateTable: (id, patch) => {
+  updateTable: (id, patch, opts) => {
     const s = get()
     const table = s.tables[id]
     if (!table) return { unseated: [] }
-    s.snapshot('edit table')
+    if (opts?.snapshot !== false) s.snapshot('edit table')
     const unseated: string[] = []
     set((st) => {
-      const next: Table = {
+      let next: Table = {
         ...table,
         ...patch,
         seats: patch.seats !== undefined ? Math.max(2, Math.min(16, patch.seats)) : table.seats,
         id,
       }
+      const room = roomRect(st.venueDimensions)
+      const bounds = tableBodyBounds(next, st.venueDimensions)
+      const dx = Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
+      const dy = Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+      next = { ...next, x: next.x + dx, y: next.y + dy }
       const seating = { ...st.seating }
       // Shrinking a table bumps the highest seat numbers back to the lounge.
       const occupants = occupantsOf(st, id)
@@ -343,6 +472,73 @@ export const useStore = create<StoreState>((set, get) => ({
     set((st) => ({
       tables: { ...st.tables, [id]: { ...st.tables[id], x, y } },
     }))
+  },
+
+  updateVenueFeature: (id, patch, opts) => {
+    const s = get()
+    if (!s.venue[id]) return
+    if (opts?.snapshot !== false) s.snapshot(patch.enabled === undefined ? 'move venue feature' : 'update venue')
+    set((st) => {
+      const room = roomRect(st.venueDimensions)
+      let next = { ...st.venue[id], ...patch, id }
+      const bounds = featureBounds(next)
+      const dx = Math.max(room.x + 6 - bounds.left, Math.min(room.x + room.w - 6 - bounds.right, 0))
+      const dy = Math.max(room.y + 6 - bounds.top, Math.min(room.y + room.h - 6 - bounds.bottom, 0))
+      next = { ...next, x: next.x + dx, y: next.y + dy }
+      return { venue: { ...st.venue, [id]: next }, finalized: false }
+    })
+  },
+
+  updateVenueDimensions: (patch) => {
+    const current = get()
+    const nextDimensions: VenueDimensions = {
+      widthFt: Math.max(20, Math.min(300, patch.widthFt ?? current.venueDimensions.widthFt)),
+      lengthFt: Math.max(15, Math.min(200, patch.lengthFt ?? current.venueDimensions.lengthFt)),
+      snapFt: Math.max(0, Math.min(10, patch.snapFt ?? current.venueDimensions.snapFt)),
+    }
+    if (
+      nextDimensions.widthFt === current.venueDimensions.widthFt &&
+      nextDimensions.lengthFt === current.venueDimensions.lengthFt &&
+      nextDimensions.snapFt === current.venueDimensions.snapFt
+    ) return
+    current.snapshot('update venue dimensions')
+    set((st) => {
+      const oldUnits = stageUnitsPerFoot(st.venueDimensions)
+      const nextUnits = stageUnitsPerFoot(nextDimensions)
+      const oldRoom = roomRect(st.venueDimensions)
+      const nextRoom = roomRect(nextDimensions)
+      const tables = Object.fromEntries(
+        Object.entries(st.tables).map(([id, table]) => {
+          let next = {
+            ...table,
+            x: nextRoom.x + ((table.x - oldRoom.x) / oldUnits.x) * nextUnits.x,
+            y: nextRoom.y + ((table.y - oldRoom.y) / oldUnits.y) * nextUnits.y,
+          }
+          const bounds = tableBodyBounds(next, nextDimensions)
+          const dx = Math.max(nextRoom.x + 6 - bounds.left, Math.min(nextRoom.x + nextRoom.w - 6 - bounds.right, 0))
+          const dy = Math.max(nextRoom.y + 6 - bounds.top, Math.min(nextRoom.y + nextRoom.h - 6 - bounds.bottom, 0))
+          next = { ...next, x: next.x + dx, y: next.y + dy }
+          return [id, next]
+        }),
+      ) as AisleState['tables']
+      const venue = Object.fromEntries(
+        Object.entries(st.venue).map(([id, feature]) => {
+          let next = {
+            ...feature,
+            x: nextRoom.x + ((feature.x - oldRoom.x) / oldUnits.x) * nextUnits.x,
+            y: nextRoom.y + ((feature.y - oldRoom.y) / oldUnits.y) * nextUnits.y,
+            w: (feature.w / oldUnits.x) * nextUnits.x,
+            h: (feature.h / oldUnits.y) * nextUnits.y,
+          }
+          const bounds = featureBounds(next)
+          const dx = Math.max(nextRoom.x + 6 - bounds.left, Math.min(nextRoom.x + nextRoom.w - 6 - bounds.right, 0))
+          const dy = Math.max(nextRoom.y + 6 - bounds.top, Math.min(nextRoom.y + nextRoom.h - 6 - bounds.bottom, 0))
+          next = { ...next, x: next.x + dx, y: next.y + dy }
+          return [id, next]
+        }),
+      ) as AisleState['venue']
+      return { venueDimensions: nextDimensions, tables, venue, finalized: false }
+    })
   },
 
   addConstraint: (c) => {
@@ -419,6 +615,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
   loadSample: (sample) => {
     get().snapshot('load sample wedding')
+    let groupOrder: string[] = []
+    for (const g of sample.guests) groupOrder = withGroup(groupOrder, g.group)
     set({
       guests: Object.fromEntries(sample.guests.map((g) => [g.id, g])),
       guestOrder: sample.guests.map((g) => g.id),
@@ -428,6 +626,9 @@ export const useStore = create<StoreState>((set, get) => ({
       seating: {},
       finalized: false,
       selection: null,
+      groupOrder,
+      venue: freshVenue(),
+      venueDimensions: freshVenueDimensions(),
     })
   },
 
@@ -449,6 +650,8 @@ export const useStore = create<StoreState>((set, get) => ({
       agentLog: [{ id: uid(), time: Date.now(), tool, summary, source }, ...s.agentLog].slice(0, 80),
     }))
   },
+
+  clearActivity: () => set({ agentLog: [] }),
 
   markTouched: (ids) => {
     if (ids.length === 0) return

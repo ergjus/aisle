@@ -19,17 +19,38 @@ export interface Table {
   seats: number
   x: number
   y: number
+  /** Clockwise rotation in degrees. */
+  rotation: number
 }
 
 export type ZoneId = 'dance_floor' | 'band' | 'entrance'
 
-export interface Zone {
-  id: ZoneId
+export type VenueFeatureId =
+  | ZoneId
+  | 'bathroom'
+  | 'photo_booth'
+  | 'bar'
+  | 'buffet'
+  | 'cake_table'
+  | 'gift_table'
+
+export interface VenueFeature {
+  id: VenueFeatureId
   label: string
+  enabled: boolean
   x: number
   y: number
   w: number
   h: number
+  /** Clockwise rotation in degrees. */
+  rotation: number
+}
+
+export interface VenueDimensions {
+  widthFt: number
+  lengthFt: number
+  /** Grid increment used while moving and resizing. */
+  snapFt: number
 }
 
 export type Constraint =
@@ -80,6 +101,8 @@ export type Violation =
     }
 
 export interface AisleState {
+  /** Persisted floor-plan coordinate model version. */
+  layoutVersion: number
   guests: Record<string, Guest>
   guestOrder: string[]
   tables: Record<string, Table>
@@ -88,4 +111,10 @@ export interface AisleState {
   /** guestId -> seat */
   seating: Record<string, SeatAssignment>
   finalized: boolean
+  /** Known group/party names, in display order. Can include groups with no guests yet. */
+  groupOrder: string[]
+  /** Saved, shared floor-plan amenities. Both people and WebMCP agents edit this same layout. */
+  venue: Record<VenueFeatureId, VenueFeature>
+  /** Real-world dimensions represented by the planning floor. */
+  venueDimensions: VenueDimensions
 }
