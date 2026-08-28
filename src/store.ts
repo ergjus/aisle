@@ -52,6 +52,12 @@ export interface Selection {
   at: { x: number; y: number }
 }
 
+export interface UndoEntry {
+  state: AisleState
+  /** Short name of the action this snapshot precedes, e.g. "seat guest". */
+  label: string
+}
+
 export interface StoreState extends AisleState {
   agentConnected: boolean
   webmcpAvailable: boolean
@@ -60,11 +66,11 @@ export interface StoreState extends AisleState {
   touched: Record<string, number>
   selection: Selection | null
   draggingGuest: string | null
-  undoStack: AisleState[]
-  redoStack: AisleState[]
+  undoStack: UndoEntry[]
+  redoStack: UndoEntry[]
   toast: string | null
 
-  snapshot: () => void
+  snapshot: (label?: string) => void
   undo: () => boolean
   redo: () => boolean
 
@@ -143,9 +149,9 @@ export const useStore = create<StoreState>((set, get) => ({
   redoStack: [],
   toast: null,
 
-  snapshot: () => {
+  snapshot: (label = 'change') => {
     const s = get()
-    const stack = [...s.undoStack, structuredClone(coreOf(s))]
+    const stack = [...s.undoStack, { state: structuredClone(coreOf(s)), label }]
     if (stack.length > MAX_UNDO) stack.shift()
     set({ undoStack: stack, redoStack: [] })
   },
@@ -155,11 +161,12 @@ export const useStore = create<StoreState>((set, get) => ({
     const prev = s.undoStack[s.undoStack.length - 1]
     if (!prev) return false
     set({
-      ...prev,
+      ...prev.state,
       undoStack: s.undoStack.slice(0, -1),
-      redoStack: [...s.redoStack, structuredClone(coreOf(s))],
+      redoStack: [...s.redoStack, { state: structuredClone(coreOf(s)), label: prev.label }],
       selection: null,
     })
+    get().logActivity('undo', `Undid: ${prev.label}.`, 'you')
     return true
   },
 
@@ -168,16 +175,17 @@ export const useStore = create<StoreState>((set, get) => ({
     const next = s.redoStack[s.redoStack.length - 1]
     if (!next) return false
     set({
-      ...next,
+      ...next.state,
       redoStack: s.redoStack.slice(0, -1),
-      undoStack: [...s.undoStack, structuredClone(coreOf(s))],
+      undoStack: [...s.undoStack, { state: structuredClone(coreOf(s)), label: next.label }],
       selection: null,
     })
+    get().logActivity('redo', `Redid: ${next.label}.`, 'you')
     return true
   },
 
   addGuest: (fields) => {
-    get().snapshot()
+    get().snapshot('add guest')
     const guest: Guest = {
       id: uid(),
       name: fields.name.trim(),
@@ -197,7 +205,7 @@ export const useStore = create<StoreState>((set, get) => ({
   updateGuest: (id, patch) => {
     const s = get()
     if (!s.guests[id]) return
-    s.snapshot()
+    s.snapshot('edit guest')
     set((st) => {
       const next: Guest = { ...st.guests[id], ...patch, id }
       const seating = { ...st.seating }
@@ -210,7 +218,7 @@ export const useStore = create<StoreState>((set, get) => ({
   removeGuest: (id) => {
     const s = get()
     if (!s.guests[id]) return
-    s.snapshot()
+    s.snapshot('remove guest')
     set((st) => {
       const guests = { ...st.guests }
       delete guests[id]
@@ -231,7 +239,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   importGuests: (entries) => {
     if (entries.length === 0) return []
-    get().snapshot()
+    get().snapshot('import guests')
     const added: Guest[] = []
     set((s) => {
       const guests = { ...s.guests }
@@ -260,7 +268,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   addTable: (fields = {}) => {
     const s = get()
-    s.snapshot()
+    s.snapshot('add table')
     const spot = fields.x !== undefined && fields.y !== undefined
       ? { x: fields.x, y: fields.y }
       : findFreeSpot(coreOf(s))
@@ -284,7 +292,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const s = get()
     const table = s.tables[id]
     if (!table) return { unseated: [] }
-    s.snapshot()
+    s.snapshot('edit table')
     const unseated: string[] = []
     set((st) => {
       const next: Table = {
@@ -310,7 +318,7 @@ export const useStore = create<StoreState>((set, get) => ({
   removeTable: (id) => {
     const s = get()
     if (!s.tables[id]) return { unseated: [] }
-    s.snapshot()
+    s.snapshot('remove table')
     const unseated = occupantsOf(s, id)
     set((st) => {
       const tables = { ...st.tables }
@@ -331,21 +339,21 @@ export const useStore = create<StoreState>((set, get) => ({
   moveTable: (id, x, y, opts) => {
     const s = get()
     if (!s.tables[id]) return
-    if (opts?.snapshot) s.snapshot()
+    if (opts?.snapshot) s.snapshot('move table')
     set((st) => ({
       tables: { ...st.tables, [id]: { ...st.tables[id], x, y } },
     }))
   },
 
   addConstraint: (c) => {
-    get().snapshot()
+    get().snapshot('add rule')
     const full = { ...c, id: c.id ?? uid() } as Constraint
     set((s) => ({ constraints: [...s.constraints, full], finalized: false }))
     return full
   },
 
   removeConstraint: (id) => {
-    get().snapshot()
+    get().snapshot('remove rule')
     set((s) => ({ constraints: s.constraints.filter((c) => c.id !== id), finalized: false }))
   },
 
@@ -364,7 +372,7 @@ export const useStore = create<StoreState>((set, get) => ({
       target = freeSeatAt(coreOf(s), tableId, taken)
     }
     if (target === -1) return { ok: false, error: `${table.name} is full (${table.seats} seats)` }
-    s.snapshot()
+    s.snapshot('seat guest')
     set((st) => ({
       seating: { ...st.seating, [guestId]: { tableId, seat: target! } },
       finalized: false,
@@ -375,7 +383,7 @@ export const useStore = create<StoreState>((set, get) => ({
   unseatGuest: (guestId) => {
     const s = get()
     if (!s.seating[guestId]) return
-    s.snapshot()
+    s.snapshot('unseat guest')
     set((st) => {
       const seating = { ...st.seating }
       delete seating[guestId]
@@ -388,7 +396,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const sa = s.seating[a]
     const sb = s.seating[b]
     if (!sa && !sb) return
-    s.snapshot()
+    s.snapshot('swap guests')
     set((st) => {
       const seating = { ...st.seating }
       if (sa) seating[b] = sa
@@ -400,17 +408,17 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   clearSeating: () => {
-    get().snapshot()
+    get().snapshot('clear seating')
     set({ seating: {}, finalized: false })
   },
 
   applyArrangement: (assignments) => {
-    get().snapshot()
+    get().snapshot('auto-arrange')
     set({ seating: { ...assignments }, finalized: false })
   },
 
   loadSample: (sample) => {
-    get().snapshot()
+    get().snapshot('load sample wedding')
     set({
       guests: Object.fromEntries(sample.guests.map((g) => [g.id, g])),
       guestOrder: sample.guests.map((g) => g.id),
@@ -424,7 +432,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   resetAll: () => {
-    get().snapshot()
+    get().snapshot('reset')
     set({ ...emptyCore(), selection: null })
   },
 

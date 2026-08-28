@@ -196,7 +196,7 @@ export function Canvas() {
     const x = d.startStage.x + dx / scale
     const y = d.startStage.y + dy / scale
     if (d.kind === 'table') {
-      if (!d.snapshotTaken) s.snapshot()
+      if (!d.snapshotTaken) s.snapshot('move table')
       const t = s.tables[d.id]
       const half = t ? tableFootprint(t) : 60
       const cx = Math.max(half, Math.min(STAGE_W - half, x))
@@ -218,13 +218,21 @@ export function Canvas() {
     }
     if (d.kind === 'chip') {
       const target = dropTargetAt({ x: d.x, y: d.y })
+      const name = s.guests[d.id]?.name
       if (target === 'tray') {
-        if (s.seating[d.id]) s.unseatGuest(d.id)
+        if (s.seating[d.id]) {
+          s.unseatGuest(d.id)
+          s.logActivity('drag', `Sent ${name} back to the lounge.`, 'you')
+        }
       } else if (target) {
+        const from = s.seating[d.id]?.tableId
         const res = s.seatGuest(d.id, target)
         if (!res.ok && res.error) s.setToast(res.error)
+        else if (from !== target) s.logActivity('drag', `Seated ${name} at ${s.tables[target]?.name}.`, 'you')
       }
       // No target: the chip glides home on its own.
+    } else if (d.moved) {
+      s.logActivity('drag', `Moved ${s.tables[d.id]?.name}.`, 'you')
     }
   }
 
@@ -402,10 +410,22 @@ export function Canvas() {
               Add guests and tables by hand, or load the sample wedding — 72 guests, 10 tables, and a healthy amount of
               family politics.
             </p>
-            <button className="btn btn-gold" onClick={() => s.loadSample(SAMPLE)}>
+            <button
+              className="btn btn-gold"
+              onClick={() => {
+                s.loadSample(SAMPLE)
+                s.logActivity('load sample', 'Loaded the sample wedding: 72 guests, 10 tables, 17 rules.', 'you')
+              }}
+            >
               Load Sample Wedding
             </button>{' '}
-            <button className="btn" onClick={() => s.addTable()}>
+            <button
+              className="btn"
+              onClick={() => {
+                const t = s.addTable()
+                s.logActivity('add table', `Added ${t.name}.`, 'you')
+              }}
+            >
               Add a Table
             </button>
           </div>

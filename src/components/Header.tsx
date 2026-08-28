@@ -40,7 +40,10 @@ export function Header() {
         </span>
         <button
           className={empty ? 'btn btn-gold' : 'btn'}
-          onClick={() => s.loadSample(SAMPLE)}
+          onClick={() => {
+            s.loadSample(SAMPLE)
+            s.logActivity('load sample', 'Loaded the sample wedding: 72 guests, 10 tables, 17 rules.', 'you')
+          }}
           title="72 guests, 10 tables, 17 seating rules — instant demo wedding"
         >
           Load Sample Wedding

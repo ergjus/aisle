@@ -24,13 +24,15 @@ function AddRule() {
 
   const add = () => {
     if (!a) return
+    let added
     if (isPair) {
       if (!b || a === b) return
-      s.addConstraint({ type: type as 'together' | 'apart', a, b })
+      added = s.addConstraint({ type: type as 'together' | 'apart', a, b })
     } else {
       const [preference, zone] = type.split(':') as ['near' | 'far', ZoneId]
-      s.addConstraint({ type: 'zone', guestId: a, zone, preference })
+      added = s.addConstraint({ type: 'zone', guestId: a, zone, preference })
     }
+    s.logActivity('add rule', `Added rule: ${constraintText(s, added)}.`, 'you')
     setA('')
     setB('')
   }
@@ -94,68 +96,42 @@ function timeAgo(t: number): string {
   return min < 60 ? `${min}m ago` : `${Math.round(min / 60)}h ago`
 }
 
+const RULES_OPEN_KEY = 'aisle:rules-open'
+
 export function RightPanel() {
   const s = useStore()
+  const [rulesOpen, setRulesOpen] = useState(() => {
+    try {
+      return localStorage.getItem(RULES_OPEN_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
+  const brokenCount = s.constraints.filter((c) => constraintStatus(s, c) === 'violated').length
+
+  const toggleRules = () => {
+    setRulesOpen((open) => {
+      try {
+        localStorage.setItem(RULES_OPEN_KEY, open ? '0' : '1')
+      } catch {
+        // Preference simply won't stick.
+      }
+      return !open
+    })
+  }
 
   return (
     <aside className="panel panel-right">
       <section>
         <h2>
-          House rules <span className="count">{s.constraints.length}</span>
+          Activity <span className="count">{s.agentLog.length > 0 ? `${s.agentLog.length} steps` : ''}</span>
         </h2>
-        {s.constraints.length > 0 && (
-          <RuleSummary />
-        )}
-        {s.constraints.length === 0 && (
-          <p style={{ color: 'var(--ink-soft)', fontSize: 12.5 }}>
-            No seating rules yet. Rules like “keep the exes apart” live here — you can add them below, or just tell your
-            agent.
+        {s.agentLog.length === 0 && (
+          <p className="feed-empty">
+            Every step lands here — yours and your agent's. Seat someone, or ask your agent to arrange the room.
           </p>
         )}
-        {s.constraints.map((c) => {
-          const status = constraintStatus(s, c)
-          const statusText = status === 'ok' ? 'kept' : status === 'violated' ? 'broken' : 'waiting — someone is unseated'
-          return (
-            <div className="constraint-row" key={c.id}>
-              <span className={`status ${status}`} title={statusText} aria-label={statusText} role="img" />
-              <span className="text">
-                {constraintText(s, c)}
-                {c.note && <span className="note">{c.note}</span>}
-              </span>
-              <button
-                className="remove"
-                title="Remove rule"
-                aria-label={`Remove rule: ${constraintText(s, c)}`}
-                onClick={() => s.removeConstraint(c.id)}
-              >
-                ×
-              </button>
-            </div>
-          )
-        })}
-        <hr className="rule" />
-        <AddRule />
-      </section>
-
-      <section>
-        <h2>
-          Activity <span className="count">{s.agentLog.length > 0 ? `${s.agentLog.length} actions` : ''}</span>
-        </h2>
-        {!s.agentConnected && (
-          <div className="agent-hint">
-            <div className="title">Bring your agent</div>
-            This page publishes <b>{s.toolNames.length || 'its'} seating tools</b> through WebMCP
-            (<code>navigator.modelContext</code>). Open it in an agent‑enabled browser and just talk:
-            <br />
-            <i>“Seat everyone — keep the exes apart, and Grandma away from the speakers.”</i>
-            <div className="sub">
-              {s.webmcpAvailable
-                ? 'WebMCP detected — your agent can already see the tools.'
-                : 'No WebMCP in this browser (Chrome: enable chrome://flags/#enable-webmcp-for-testing). You can still plan by hand — or try aisle.call("auto_arrange", {}) in the console.'}
-            </div>
-          </div>
-        )}
-        <div className="agent-feed" style={{ marginTop: 10 }}>
+        <div className="agent-feed" style={{ marginTop: 8 }}>
           {s.agentLog.map((e) => (
             <div className={e.source === 'you' ? 'agent-entry you' : 'agent-entry'} key={e.id}>
               <div className="tool">
@@ -166,6 +142,53 @@ export function RightPanel() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="rules-section">
+        <button className="section-toggle" onClick={toggleRules} aria-expanded={rulesOpen}>
+          <span className="chev" aria-hidden="true">
+            {rulesOpen ? '▾' : '▸'}
+          </span>
+          House rules
+          <span className="count">{s.constraints.length}</span>
+          {!rulesOpen && brokenCount > 0 && <span className="k violated">· {brokenCount} broken</span>}
+        </button>
+        {rulesOpen && (
+          <div className="rules-body">
+            {s.constraints.length > 0 && <RuleSummary />}
+            {s.constraints.length === 0 && (
+              <p className="feed-empty">
+                Rules like “keep the exes apart” live here — add one below, or just tell your agent.
+              </p>
+            )}
+            {s.constraints.map((c) => {
+              const status = constraintStatus(s, c)
+              const statusText = status === 'ok' ? 'kept' : status === 'violated' ? 'broken' : 'waiting — someone is unseated'
+              return (
+                <div className="constraint-row" key={c.id}>
+                  <span className={`status ${status}`} title={statusText} aria-label={statusText} role="img" />
+                  <span className="text">
+                    {constraintText(s, c)}
+                    {c.note && <span className="note">{c.note}</span>}
+                  </span>
+                  <button
+                    className="remove"
+                    title="Remove rule"
+                    aria-label={`Remove rule: ${constraintText(s, c)}`}
+                    onClick={() => {
+                      s.logActivity('remove rule', `Removed rule: ${constraintText(s, c)}.`, 'you')
+                      s.removeConstraint(c.id)
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              )
+            })}
+            <hr className="rule" />
+            <AddRule />
+          </div>
+        )}
       </section>
     </aside>
   )

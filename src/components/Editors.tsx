@@ -65,11 +65,23 @@ function GuestEditor({ sel }: { sel: Selection }) {
         {seat ? `Seated at ${s.tables[seat.tableId]?.name}` : 'Not seated — drag their chip onto a table.'}
       </div>
       <div className="actions">
-        <button className="btn btn-danger" onClick={() => s.removeGuest(g.id)}>
+        <button
+          className="btn btn-danger"
+          onClick={() => {
+            s.logActivity('remove guest', `Removed ${g.name} from the guest list.`, 'you')
+            s.removeGuest(g.id)
+          }}
+        >
           Remove
         </button>
         {seat && (
-          <button className="btn" onClick={() => s.unseatGuest(g.id)}>
+          <button
+            className="btn"
+            onClick={() => {
+              s.unseatGuest(g.id)
+              s.logActivity('unseat', `Sent ${g.name} back to the lounge.`, 'you')
+            }}
+          >
             Unseat
           </button>
         )}
@@ -122,7 +134,13 @@ function TableEditor({ sel }: { sel: Selection }) {
         {occ}/{t.seats} seats taken · drag the table to move it around the room
       </div>
       <div className="actions">
-        <button className="btn btn-danger" onClick={() => s.removeTable(t.id)}>
+        <button
+          className="btn btn-danger"
+          onClick={() => {
+            s.logActivity('remove table', `Removed ${t.name}.`, 'you')
+            s.removeTable(t.id)
+          }}
+        >
           Remove Table
         </button>
         <button className="btn btn-quiet" onClick={() => s.setSelection(null)}>

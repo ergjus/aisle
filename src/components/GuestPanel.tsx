@@ -28,7 +28,8 @@ export function GuestPanel() {
 
   const submitGuest = () => {
     if (!name.trim()) return
-    s.addGuest({ name: name.trim(), group: group.trim() || undefined })
+    const guest = s.addGuest({ name: name.trim(), group: group.trim() || undefined })
+    s.logActivity('add guest', `Added ${guest.name} (${guest.group}).`, 'you')
     setName('')
   }
 
@@ -40,6 +41,7 @@ export function GuestPanel() {
     }
     const added = s.importGuests(entries)
     s.setToast(`Imported ${added.length} guest${added.length === 1 ? '' : 's'}.`)
+    s.logActivity('import guests', `Imported ${added.length} guest${added.length === 1 ? '' : 's'} from a pasted list.`, 'you')
     setImportText('')
     setShowImport(false)
   }
