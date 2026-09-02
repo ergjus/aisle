@@ -138,6 +138,12 @@ export function autoArrange(
   const before: Record<string, string> = {}
   for (const g of ctx.attendees) before[g] = state.seating[g]?.tableId ?? ''
 
+  // Pinned guests are the human's hand-placed seats: they never move, in
+  // either mode. (A pin on a guest whose table has since vanished is moot.)
+  const pinned = new Set(
+    ctx.attendees.filter((g) => state.pinned?.[g] && before[g] && ctx.capacity[before[g]] !== undefined),
+  )
+
   const occupancy: Record<string, number> = Object.fromEntries(ctx.tables.map((t) => [t, 0]))
   const seatIn = (g: string, t: string) => {
     if (at[g]) occupancy[at[g]]--
@@ -150,6 +156,8 @@ export function autoArrange(
   if (mode === 'repair') {
     for (const g of ctx.attendees) if (before[g]) seatIn(g, before[g])
   } else {
+    // Pins go down first; everyone else is arranged around them.
+    for (const g of pinned) seatIn(g, before[g])
     // Greedy seed: place together-clusters (largest and most-constrained first).
     const clusters = [...unionFind(ctx).values()]
     const zoneByGuest = new Map(ctx.zones.map((z) => [z.guestId, z]))
@@ -159,6 +167,10 @@ export function autoArrange(
       return zb - za || b.length - a.length
     })
     for (let cluster of clusters) {
+      // A cluster with a pinned member wants the rest of it at that table.
+      const anchorTables = new Set(cluster.filter((g) => pinned.has(g)).map((g) => at[g]))
+      cluster = cluster.filter((g) => !pinned.has(g))
+      if (cluster.length === 0) continue
       const maxTable = Math.max(...ctx.tables.map((t) => ctx.capacity[t]))
       if (cluster.length > maxTable) {
         splitClusters.push(ctx.state.guests[cluster[0]].group)
@@ -169,6 +181,7 @@ export function autoArrange(
       for (const t of ctx.tables) {
         if (ctx.capacity[t] - occupancy[t] < cluster.length) continue
         let cost = 0
+        if (anchorTables.has(t)) cost -= 40
         for (const g of cluster) {
           const z = zoneByGuest.get(g)
           if (z && !zoneOk(ctx, z, t)) cost += 12
@@ -212,12 +225,13 @@ export function autoArrange(
     }
     flagged()
   }
+  for (const g of pinned) movable.delete(g)
 
   const baseline = mode === 'repair' ? before : undefined
   let current = scoreAll(ctx, at, baseline)
   const movableArr = [...movable]
   const iterations = mode === 'repair' ? 2500 : 6000
-  const pool = mode === 'repair' ? movableArr : ctx.attendees
+  const pool = mode === 'repair' ? movableArr : ctx.attendees.filter((g) => !pinned.has(g))
   if (pool.length > 0) {
     for (let i = 0; i < iterations && current > 0; i++) {
       const g = pool[Math.floor(rnd() * pool.length)]
@@ -229,7 +243,7 @@ export function autoArrange(
         if (candT === prevT || occupancy[candT] >= ctx.capacity[candT]) continue
       } else {
         candidateSwap = ctx.attendees[Math.floor(rnd() * ctx.attendees.length)]
-        if (candidateSwap === g) continue
+        if (candidateSwap === g || pinned.has(candidateSwap)) continue
         if (mode === 'repair' && !movable.has(candidateSwap) && !movable.has(g)) continue
         candT = at[candidateSwap]
         if (candT === prevT) continue
@@ -274,16 +288,14 @@ export function autoArrange(
     })
     const used = new Set<number>()
     const later: string[] = []
-    if (mode === 'repair') {
-      for (const g of members) {
-        const prev = state.seating[g]
-        if (prev && prev.tableId === t && prev.seat < ctx.capacity[t] && !used.has(prev.seat)) {
-          assignments[g] = { tableId: t, seat: prev.seat }
-          used.add(prev.seat)
-        } else later.push(g)
-      }
-    } else {
-      later.push(...members)
+    for (const g of members) {
+      // Untouched seats stay put in repair mode; a pinned seat stays put always.
+      const prev = state.seating[g]
+      const keep = mode === 'repair' || pinned.has(g)
+      if (keep && prev && prev.tableId === t && prev.seat < ctx.capacity[t] && !used.has(prev.seat)) {
+        assignments[g] = { tableId: t, seat: prev.seat }
+        used.add(prev.seat)
+      } else later.push(g)
     }
     let s = 0
     for (const g of later) {
@@ -308,6 +320,12 @@ export function autoArrange(
   )
   const declined = state.guestOrder.length - ctx.attendees.length
   if (mode === 'full' && declined > 0) lines.push(`${declined} guest${declined === 1 ? '' : 's'} declined and stay off the chart.`)
+  if (pinned.size > 0) {
+    const names = [...pinned].slice(0, 4).map(name)
+    lines.push(
+      `Left ${pinned.size} pinned guest${pinned.size === 1 ? '' : 's'} exactly where you put them${names.length ? ` (${names.join(', ')}${pinned.size > 4 ? '…' : ''})` : ''}.`,
+    )
+  }
 
   if (mode === 'repair' && movedCount > 0) {
     const moves = ctx.attendees

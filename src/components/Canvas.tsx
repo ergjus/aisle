@@ -27,6 +27,9 @@ import {
 } from '../geometry'
 import { agentChipDelay } from '../agentCursor'
 import { AgentCursor } from './AgentCursor'
+import { AgentQuestion } from './AgentQuestion'
+import { Celebration } from './Celebration'
+import { ChairGlyph, FeatureArt, TableArt } from './FloorArt'
 import { computeViolations } from '../constraints'
 import { groupColors, hashId, initials } from '../utils'
 import { SAMPLE } from '../sample'
@@ -72,18 +75,6 @@ interface LayoutOrigin extends LayoutItem { x: number; y: number }
 
 const layoutKey = (kind: LayoutKind, id: string) => `${kind}:${id}`
 
-const FEATURE_GLYPHS: Record<VenueFeatureId, string> = {
-  entrance: '↳',
-  band: '♪',
-  dance_floor: '✦',
-  bathroom: 'WC',
-  photo_booth: '▣',
-  bar: '◒',
-  buffet: '≋',
-  cake_table: '♢',
-  gift_table: '♥',
-}
-
 const FEATURE_SHORT_LABELS: Record<VenueFeatureId, string> = {
   entrance: 'Entrance',
   band: 'Band',
@@ -110,16 +101,21 @@ function Chip(props: {
   violated: boolean
   /** Spotlit because the user is hovering a rule involving this guest. */
   highlighted?: boolean
+  /** The human pinned this seat — the solver and the agent leave it alone. */
+  pinned?: boolean
+  /** When the human last dropped this chip onto a seat — plays a small settle. */
+  landedAt?: number
   touchedAt: number | undefined
   staggerMs: number
   whereLabel: string
   onPointerDown: (e: React.PointerEvent) => void
   onKeyDown: (e: React.KeyboardEvent) => void
 }) {
-  const { guest, x, y, layout, color, dragging, selected, violated, highlighted, touchedAt, staggerMs, whereLabel } = props
+  const { guest, x, y, layout, color, dragging, selected, violated, highlighted, pinned, landedAt, touchedAt, staggerMs, whereLabel } = props
   // A fresh touchedAt remounts the keyed overlays, replaying their one-shot
   // CSS animations. No JS timers: fill-mode ends them, so nothing can stick.
   const flashing = touchedAt !== undefined && Date.now() - touchedAt < 4000
+  const justLanded = landedAt !== undefined && Date.now() - landedAt < 1200
 
   // A chip promoted from the lounge mounts fresh on the stage, so its transform
   // transition has no "from". Render one flushed layout at spawnFrom, then move
@@ -156,6 +152,7 @@ function Chip(props: {
     dragging && 'dragging',
     selected && 'selected',
     highlighted && 'rule-glow',
+    pinned && 'pinned',
     guest.rsvp === 'pending' && 'rsvp-pending',
   ]
     .filter(Boolean)
@@ -173,7 +170,7 @@ function Chip(props: {
       role="button"
       data-tour-guest={guest.id}
       tabIndex={0}
-      aria-label={`${guest.name} — ${whereLabel}${violated ? ' — part of a broken rule' : ''}. Press Enter to edit.`}
+      aria-label={`${guest.name} — ${whereLabel}${pinned ? ' — pinned' : ''}${violated ? ' — part of a broken rule' : ''}. Press Enter to edit${!isFlow ? ', P to pin' : ''}.`}
       onKeyDown={props.onKeyDown}
       onPointerDown={props.onPointerDown}
       onPointerEnter={isFlow ? () => setFlowHovered(true) : undefined}
@@ -181,6 +178,8 @@ function Chip(props: {
     >
       {initials(guest.name)}
       {flashing && <span key={touchedAt} className="pulse-ring" style={{ animationDelay: `${staggerMs}ms` }} />}
+      {justLanded && <span key={`l${landedAt}`} className="chip-settle" />}
+      {pinned && <span className="pin" title="Pinned — stays put through Seat Everyone, repairs, and agent moves" />}
       {violated && <span className="viol-dot" title="Part of a violated rule" />}
       {!isFlow && <span className="nametag">{guest.name}</span>}
       {!isFlow && flashing && (
@@ -243,6 +242,8 @@ export function Canvas() {
   const [loungeHeight, setLoungeHeightState] = useState(() => readPersistedNumber('aisle:lounge:height', LOUNGE_DEFAULT_H))
   const [loungeCollapsed, setLoungeCollapsedState] = useState(() => readPersistedBool('aisle:lounge:collapsed', false))
   const [loungeResizing, setLoungeResizing] = useState(false)
+  /** The chip the human most recently dropped onto a seat, for its settle animation. */
+  const [landed, setLanded] = useState<{ id: string; at: number } | null>(null)
   /** True while the lounge is folded away only because nobody is waiting in it. */
   const autoCollapsed = useRef(false)
   /** -1 so the very first pass counts as a change and folds an empty lounge away. */
@@ -767,7 +768,10 @@ export function Canvas() {
         const from = s.seating[d.id]?.tableId
         const res = s.seatGuest(d.id, target)
         if (!res.ok && res.error) s.setToast(res.error)
-        else if (from !== target) s.logActivity('drag', `Seated ${name} at ${s.tables[target]?.name}.`, 'you')
+        else {
+          setLanded({ id: d.id, at: Date.now() })
+          if (from !== target) s.logActivity('drag', `Seated ${name} at ${s.tables[target]?.name}.`, 'you')
+        }
       }
       // No target: the chip glides home on its own.
     } else if (d.kind === 'rotate-feature' || d.kind === 'rotate-table') {
@@ -843,6 +847,14 @@ export function Canvas() {
           </button>
         </div>
       )}
+      {s.question && (
+        <AgentQuestion
+          question={s.question}
+          belowBanner={Boolean(s.proposal)}
+          onAnswer={(answer) => s.answerQuestion(s.question!.id, answer)}
+        />
+      )}
+      <Celebration active={s.finalized} />
       <div className="canvas-zoom-controls" role="group" aria-label="Floor plan zoom">
         <button
           type="button"
@@ -886,8 +898,39 @@ export function Canvas() {
             ['--grid-y' as string]: `${unitsPerFoot.y * 5}px`,
           }}
         />
-        <div className="room-caption" style={{ left: room.x + room.w / 2, top: room.y - 6 }}>
-          Main room · {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)}
+        {/* Dimension strings along the top and left walls, lettered the way an
+            architect's sheet is — ticks at each end, the measure in the middle. */}
+        <svg className="room-dims" width={stageDims.w} height={stageDims.h} aria-hidden="true">
+          <line x1={room.x} y1={room.y - 22} x2={room.x + room.w} y2={room.y - 22} />
+          <line x1={room.x} y1={room.y - 28} x2={room.x} y2={room.y - 16} />
+          <line x1={room.x + room.w} y1={room.y - 28} x2={room.x + room.w} y2={room.y - 16} />
+          <text x={room.x + room.w / 2} y={room.y - 27} textAnchor="middle">
+            {formatFeet(s.venueDimensions.widthFt)}
+          </text>
+          <line x1={room.x - 22} y1={room.y} x2={room.x - 22} y2={room.y + room.h} />
+          <line x1={room.x - 28} y1={room.y} x2={room.x - 16} y2={room.y} />
+          <line x1={room.x - 28} y1={room.y + room.h} x2={room.x - 16} y2={room.y + room.h} />
+          <text transform={`translate(${room.x - 27} ${room.y + room.h / 2}) rotate(-90)`} textAnchor="middle">
+            {formatFeet(s.venueDimensions.lengthFt)}
+          </text>
+        </svg>
+        {/* The title block, bottom-right of the sheet. */}
+        <div className="title-block" style={{ left: room.x + room.w, top: room.y + room.h + 30 }}>
+          <span className="title-block-name">
+            Aisle <em>floor plan</em>
+          </span>
+          <span className="title-block-cell">
+            <b>Room</b>
+            {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)}
+          </span>
+          <span className="title-block-cell">
+            <b>Drawn by</b>
+            {s.agentConnected ? 'You & the agent' : 'You'}
+          </span>
+          <span className="title-block-cell">
+            <b>Rev.</b>
+            {s.undoStack.length}
+          </span>
         </div>
         <button
           type="button"
@@ -1052,26 +1095,40 @@ export function Canvas() {
           )
         })}
 
-        {/* empty seat markers */}
+        {/* chairs — one per seat, turned to face the table; occupied ones sit
+            beneath their guest's chip with the backrest peeking out behind. */}
         {s.tableOrder.flatMap((tid) => {
           const t = s.tables[tid]
-          const occSeats = new Set(
-            Object.values(s.seating)
-              .filter((a) => a.tableId === tid)
-              .map((a) => a.seat),
-          )
-          // Positioned by transform, like the table itself, so an empty seat
+          // Positioned by transform, like the table itself, so a chair
           // travels with its table instead of snapping ahead of it.
           const glide = live.has(layoutKey('table', tid)) ? '' : ' glide'
+          // While a chip hovers over this table, the chair it would take pulls
+          // out a little to say "sit here" — the same seat seatGuest will pick.
+          let inviting = -1
+          if (drag?.kind === 'chip' && drag.target === tid) {
+            const taken = new Set(
+              Object.entries(s.seating)
+                .filter(([gid, a]) => a.tableId === tid && gid !== drag.id)
+                .map(([, a]) => a.seat),
+            )
+            for (let i = 0; i < t.seats; i++) {
+              if (!taken.has(i)) {
+                inviting = i
+                break
+              }
+            }
+          }
           return Array.from({ length: t.seats }, (_, i) => {
-            if (occSeats.has(i)) return null
             const p = seatPos(t, i, s.venueDimensions)
+            const facing = (Math.atan2(t.y - p.y, t.x - p.x) * 180) / Math.PI
             return (
               <span
                 key={`${tid}-${i}`}
-                className={`seat-dot${glide}`}
-                style={{ transform: `translate(${p.x}px, ${p.y}px) translate(-50%, -50%)` }}
-              />
+                className={`seat-chair${glide}${i === inviting ? ' inviting' : ''}`}
+                style={{ transform: `translate(${p.x}px, ${p.y}px) translate(-50%, -50%) rotate(${facing}deg)` }}
+              >
+                <ChairGlyph />
+              </span>
             )
           })
         })}
@@ -1104,11 +1161,20 @@ export function Canvas() {
               selected={s.selection?.kind === 'guest' && s.selection.id === id}
               violated={violatedGuests.has(id)}
               highlighted={s.ruleHighlight?.guestIds.includes(id)}
+              pinned={Boolean(s.pinned[id])}
+              landedAt={landed?.id === id ? landed.at : undefined}
               touchedAt={touchedAt}
               staggerMs={escortDelay ?? (recentTouch ? (hashId(id) % 12) * 30 : 0)}
               whereLabel={`at ${s.tables[s.seating[id].tableId]?.name}`}
               onPointerDown={(e) => beginDrag(e, 'chip', id, positions[id])}
               onKeyDown={(e) => {
+                if (e.key.toLowerCase() === 'p' && !e.metaKey && !e.ctrlKey) {
+                  e.preventDefault()
+                  const next = !s.pinned[id]
+                  s.pinGuest(id, next)
+                  s.logActivity('pin', next ? `Pinned ${g.name} at ${s.tables[s.seating[id].tableId]?.name}.` : `Unpinned ${g.name}.`, 'you')
+                  return
+                }
                 if (e.key !== 'Enter' && e.key !== ' ') return
                 e.preventDefault()
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -1297,7 +1363,7 @@ function VenueFeatureView(props: {
   const measured = feetSize(feature.w, feature.h, props.dimensions)
   // Label density follows the amenity's real size, in feet, like everything else.
   const micro = feature.w < ft(4.5) || feature.h < ft(2.5)
-  const compact = micro || feature.w < ft(8) || feature.h < ft(4)
+  const compact = micro || feature.w < ft(8.5) || feature.h < ft(4)
   const horizontal = !micro && feature.w >= ft(7) && feature.h < ft(4)
   const densityClass = `${compact ? ' compact' : ''}${micro ? ' micro' : ''}${horizontal ? ' horizontal-content' : ''}`
   return (
@@ -1307,6 +1373,7 @@ function VenueFeatureView(props: {
       role="group"
       aria-label={`${feature.label}, ${formatFeet(measured.w)} by ${formatFeet(measured.h)}${props.warnings.length ? `, ${props.warnings.join(', ')}` : ''}`}
     >
+      <FeatureArt feature={feature} />
       <button
         type="button"
         className="feature-move-surface"
@@ -1314,13 +1381,6 @@ function VenueFeatureView(props: {
         onPointerDown={props.onPointerDown}
         onKeyDown={props.onKeyDown}
       >
-        {feature.id === 'band' && (
-          <>
-            <span className="speaker speaker-left" aria-hidden="true" />
-            <span className="speaker speaker-right" aria-hidden="true" />
-          </>
-        )}
-        <span className="feature-glyph" aria-hidden="true">{FEATURE_GLYPHS[feature.id]}</span>
         <span className="zone-label">{compact ? FEATURE_SHORT_LABELS[feature.id] : feature.label}</span>
         <span className="move-hint" aria-hidden="true">drag to move</span>
       </button>
@@ -1394,7 +1454,7 @@ function TableView(props: {
           width: size.w,
           height: size.h,
         ...(dropTarget
-          ? { boxShadow: 'inset 0 0 0 1px rgba(41,36,25,.22), 0 0 0 3px var(--gold-bright), 0 6px 18px rgba(10,16,12,.45)' }
+          ? { boxShadow: 'inset 0 0 0 1px rgba(41,36,25,.22), 0 0 0 3px var(--color-gold-bright), 0 6px 18px rgba(10,16,12,.45)' }
           : {}),
         }}
         role="button"
@@ -1403,6 +1463,7 @@ function TableView(props: {
         onKeyDown={props.onKeyDown}
         onPointerDown={props.onPointerDown}
       >
+        <TableArt table={table} size={size} />
         <span className="t-name">{table.name}</span>
         <span className="t-count">
           {occupied} / {table.seats}

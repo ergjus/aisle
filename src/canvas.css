@@ -11,6 +11,10 @@
 
 .canvas-wrap {
   position: relative;
+  /* Everything layered inside the canvas — zoom controls, banners, the
+     question card — stacks inside it, so the masthead's menu and the toolbox
+     page can sit above the whole floor plan without a z-index arms race. */
+  isolation: isolate;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -54,7 +58,7 @@
 .canvas-zoom-controls button:hover:not(:disabled) { background: rgba(197, 165, 94, 0.12); }
 .canvas-zoom-controls button:focus-visible { outline: 2px solid var(--color-gold-bright); outline-offset: -3px; }
 .canvas-zoom-controls button:disabled { opacity: 0.35; cursor: default; }
-.canvas-zoom-controls .zoom-readout { color: rgba(236, 223, 195, 0.58); font-size: 9.5px; letter-spacing: 0.04em; }
+.canvas-zoom-controls .zoom-readout { color: rgba(236, 223, 195, 0.58); font-family: var(--font-mono); font-size: 10px; font-weight: 500; }
 
 .stage {
   position: absolute;
@@ -69,28 +73,32 @@
 .room-frame {
   position: absolute;
   border: 1px solid rgba(197, 165, 94, 0.42);
-  border-radius: 14px;
+  border-radius: 3px;
   pointer-events: none;
   background:
     linear-gradient(rgba(232, 207, 143, 0.022) 1px, transparent 1px),
     linear-gradient(90deg, rgba(232, 207, 143, 0.022) 1px, transparent 1px),
+    /* floorboard seams, ~2.3′ planks */
+    repeating-linear-gradient(90deg, rgba(236, 223, 195, 0.02) 0 1px, transparent 1px 46px),
     radial-gradient(900px 520px at 42% 34%, rgba(236, 223, 195, 0.055), transparent 64%),
     linear-gradient(180deg, #21372a, #192d22);
   background-size:
     var(--grid-x, 100px) var(--grid-y, 100px),
     var(--grid-x, 100px) var(--grid-y, 100px),
+    auto,
     100% 100%,
     100% 100%;
-  background-repeat: repeat, repeat, no-repeat, no-repeat;
+  background-repeat: repeat, repeat, repeat, no-repeat, no-repeat;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22), inset 0 0 38px rgba(5, 12, 8, 0.18);
 }
 
+/* The inner line of a double-line wall, the way plans draw masonry. */
 .room-frame::after {
   content: '';
   position: absolute;
-  inset: 5px;
+  inset: 6px;
   border: 1px solid rgba(197, 165, 94, 0.16);
-  border-radius: 10px;
+  border-radius: 1px;
 }
 
 .room-frame.resizing {
@@ -148,32 +156,90 @@
   transform: translate(-100%, -100%) scale(var(--handle-scale, 1));
   transform-origin: 100% 100%;
   border: 1px solid rgba(197, 165, 94, 0.4);
-  border-radius: 999px;
+  border-radius: 3px;
   background: rgba(20, 31, 24, 0.94);
-  padding: 3px 9px;
+  padding: 3px 8px;
   color: var(--color-gold-bright);
+  font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-weight: 600;
   white-space: nowrap;
   pointer-events: none;
 }
 
-.room-caption {
+/* Dimension strings — lettered in mono, like the measure lines on a sheet. */
+.room-dims {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.room-dims line {
+  stroke: rgba(236, 223, 195, 0.42);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.room-dims text {
+  fill: rgba(236, 223, 195, 0.7);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* The title block — an architect's sheet signs itself in the corner. */
+.title-block {
   position: absolute;
   z-index: 3;
-  transform: translate(-50%, -100%);
-  border: 1px solid rgba(197, 165, 94, 0.24);
-  border-radius: 999px;
-  background: rgba(24, 38, 29, 0.9);
-  padding: 3px 10px;
-  color: rgba(236, 223, 195, 0.58);
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  display: flex;
+  transform: translateX(-100%);
+  border: 1px solid rgba(236, 223, 195, 0.28);
+  background: rgba(20, 31, 24, 0.55);
+  color: rgba(236, 223, 195, 0.66);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.title-block > span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  border-left: 1px solid rgba(236, 223, 195, 0.22);
+}
+
+.title-block > span:first-child {
+  border-left: 0;
+}
+
+.title-block b {
+  font-weight: 500;
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(236, 223, 195, 0.42);
+}
+
+.title-block-name {
+  justify-content: center;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-gold-bright);
+}
+
+.title-block-name em {
+  font-weight: 500;
+  font-style: italic;
+  color: rgba(236, 223, 195, 0.7);
 }
 
 .scale-bar {
@@ -191,8 +257,9 @@
   position: absolute;
   right: 0;
   top: 7px;
-  font-size: 9px;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
 }
 
 .alignment-guide {
@@ -212,13 +279,13 @@
   z-index: 43;
   transform: translateX(-50%);
   border: 1px solid rgba(92, 206, 192, 0.32);
-  border-radius: 999px;
+  border-radius: 3px;
   background: rgba(18, 37, 33, 0.94);
-  padding: 3px 9px;
+  padding: 3px 8px;
   color: rgba(174, 234, 225, 0.88);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
   pointer-events: none;
 }
 
@@ -304,10 +371,23 @@
   outline-offset: 3px;
 }
 
+/* The illustration layer — decorative SVG beneath the labels and handles. */
+.feature-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
 .venue-feature .zone-label {
   display: block;
-  max-width: 100%;
+  max-width: calc(100% - 6px);
   overflow: hidden;
+  border-radius: 2px;
+  background: rgba(20, 31, 24, 0.6);
+  padding: 3px 10px;
   font-family: var(--font-serif);
   font-weight: 700;
   font-size: 12px;
@@ -319,13 +399,6 @@
   white-space: nowrap;
 }
 
-.feature-glyph {
-  font-family: var(--font-serif);
-  font-size: 22px;
-  line-height: 1;
-  color: rgba(232, 207, 143, 0.68);
-}
-
 .venue-feature.compact .feature-move-surface {
   gap: 3px;
   padding: 6px;
@@ -335,16 +408,7 @@
   font-size: 9.5px;
   letter-spacing: 0.12em;
   text-indent: 0.12em;
-}
-
-.venue-feature.compact .feature-glyph {
-  font-size: 16px;
-}
-
-.venue-feature.compact .speaker {
-  bottom: 8px;
-  height: 32px;
-  opacity: 0.28;
+  padding: 2px 8px;
 }
 
 .venue-feature.horizontal-content .feature-move-surface {
@@ -358,13 +422,8 @@
 }
 
 .venue-feature.micro .zone-label,
-.venue-feature.micro .move-hint,
-.venue-feature.micro .speaker {
+.venue-feature.micro .move-hint {
   display: none;
-}
-
-.venue-feature.micro .feature-glyph {
-  font-size: 18px;
 }
 
 .move-hint {
@@ -373,14 +432,13 @@
   left: 50%;
   transform: translateX(-50%);
   border: 1px solid rgba(197, 165, 94, 0.35);
-  border-radius: 999px;
+  border-radius: 3px;
   background: rgba(20, 31, 24, 0.92);
   padding: 2px 7px;
   color: rgba(236, 223, 195, 0.65);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
@@ -462,13 +520,13 @@
   right: 19px;
   bottom: -5px;
   z-index: 7;
-  border-radius: 999px;
+  border-radius: 3px;
   background: rgba(20, 31, 24, 0.94);
   padding: 2px 7px;
   color: rgba(236, 223, 195, 0.66);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
   pointer-events: none;
   opacity: 0;
   transition: opacity 120ms ease;
@@ -506,43 +564,22 @@
   pointer-events: none;
 }
 
+/* Per-amenity chrome: the illustration itself is the .feature-art SVG; here
+   each type keeps only its frame — gold for the zones a guest stands in,
+   sage for furniture, dashed linen for the threshold. */
 .venue-feature-dance_floor {
   border: 1px solid rgba(197, 165, 94, 0.5);
-  background:
-    linear-gradient(45deg, rgba(197, 165, 94, 0.14) 25%, transparent 25%, transparent 75%, rgba(197, 165, 94, 0.14) 75%),
-    linear-gradient(45deg, rgba(197, 165, 94, 0.14) 25%, transparent 25%, transparent 75%, rgba(197, 165, 94, 0.14) 75%),
-    rgba(197, 165, 94, 0.035);
-  background-position: 0 0, 14px 14px;
-  background-size: 28px 28px;
-}
-
-.venue-feature-dance_floor .feature-glyph {
-  font-size: 30px;
+  background: rgba(197, 165, 94, 0.03);
 }
 
 .venue-feature-band {
   border: 1px dashed rgba(197, 165, 94, 0.45);
-  background: linear-gradient(to bottom, rgba(197, 165, 94, 0.1), rgba(197, 165, 94, 0.035));
-  box-shadow: inset 0 -7px rgba(197, 165, 94, 0.07);
+  background: linear-gradient(to bottom, rgba(197, 165, 94, 0.08), rgba(197, 165, 94, 0.03));
 }
-
-.speaker {
-  position: absolute;
-  bottom: 18px;
-  width: 15px;
-  height: 48px;
-  border: 1px solid rgba(232, 207, 143, 0.32);
-  border-radius: 3px;
-  background: radial-gradient(circle at 50% 70%, rgba(232, 207, 143, 0.26) 0 4px, transparent 5px), #17231b;
-}
-
-.speaker-left { left: 16px; }
-.speaker-right { right: 16px; }
 
 .venue-feature-entrance {
   border: 1px dashed rgba(236, 223, 195, 0.35);
-  background:
-    linear-gradient(90deg, rgba(236, 223, 195, 0.08) 0 5px, transparent 5px calc(100% - 5px), rgba(236, 223, 195, 0.08) calc(100% - 5px));
+  background: rgba(236, 223, 195, 0.02);
 }
 
 .venue-feature-bathroom,
@@ -552,44 +589,12 @@
 .venue-feature-cake_table,
 .venue-feature-gift_table {
   border: 1px solid rgba(143, 160, 138, 0.4);
-  background: rgba(143, 160, 138, 0.07);
+  background: rgba(143, 160, 138, 0.06);
   color: rgba(236, 223, 195, 0.7);
-}
-
-.venue-feature-bathroom .feature-glyph {
-  font-family: var(--font-sans);
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-}
-
-.venue-feature-photo_booth {
-  background:
-    radial-gradient(circle at 50% 38%, rgba(232, 207, 143, 0.2) 0 7px, transparent 8px),
-    rgba(143, 160, 138, 0.07);
-}
-
-.venue-feature-bar {
-  background:
-    linear-gradient(to bottom, transparent 0 58%, rgba(197, 165, 94, 0.13) 58% 66%, transparent 66%),
-    rgba(143, 160, 138, 0.07);
-}
-
-.venue-feature-buffet {
-  background:
-    radial-gradient(circle, rgba(232, 207, 143, 0.18) 0 3px, transparent 4px) 14px 12px / 32px 32px,
-    rgba(143, 160, 138, 0.07);
 }
 
 .venue-feature-cake_table {
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(232, 207, 143, 0.12) 0 28%, transparent 29%), rgba(143, 160, 138, 0.07);
-}
-
-.venue-feature-gift_table {
-  background:
-    linear-gradient(45deg, transparent 46%, rgba(232, 207, 143, 0.12) 47% 53%, transparent 54%),
-    rgba(143, 160, 138, 0.07);
 }
 
 /* ---- the lounge -------------------------------------------------------------
@@ -688,18 +693,19 @@
 }
 
 .lounge-label {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(236, 223, 195, 0.55);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 600;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  color: rgba(236, 223, 195, 0.7);
 }
 
 .lounge-meta {
-  color: rgba(236, 223, 195, 0.38);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  color: rgba(236, 223, 195, 0.42);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .lounge-chips {
@@ -744,7 +750,7 @@
    agent's placement, a rule repair, the room being resized. The class is
    dropped while the pointer is dragging the piece, so that stays 1:1. */
 .table-wrap.glide,
-.seat-dot.glide {
+.seat-chair.glide {
   transition: transform 500ms ease;
 }
 
@@ -811,6 +817,22 @@
   border-radius: 12px;
 }
 
+/* The linen-and-china layer under the labels. */
+.table-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.table .t-name,
+.table .t-count {
+  position: relative;
+  z-index: 1;
+}
+
 .table .t-name {
   font-family: var(--font-serif);
   font-weight: 700;
@@ -823,10 +845,10 @@
 }
 
 .table .t-count {
-  font-size: 10.5px;
-  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
   color: var(--color-ink-soft);
-  letter-spacing: 0.08em;
   pointer-events: none;
 }
 
@@ -884,15 +906,29 @@
   }
 }
 
-.seat-dot {
+/* One chair per seat, rotated to face its table. Occupied chairs sit under
+   the guest's chip; the backrest peeks out on the aisle side. */
+.seat-chair {
   position: absolute;
   top: 0;
   left: 0;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(236, 223, 195, 0.5);
+  width: 33px;
+  height: 33px;
   pointer-events: none;
+}
+
+.seat-chair svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transition: transform 170ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The chair a hovering chip would take pulls out from the table to say
+   "sit here" — the marker is rotated to face the table, so local −x is away. */
+.seat-chair.inviting svg {
+  transform: translateX(-7px);
+  filter: drop-shadow(0 0 5px rgba(232, 207, 143, 0.55));
 }
 
 /* ---- guest chips ----------------------------------------------------------- */
@@ -971,6 +1007,49 @@
   border: 2px solid var(--color-pine-900);
 }
 
+/* A pushpin, seen from above: the human's "leave this one exactly here". */
+.chip .pin {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, #f7e7b8, var(--color-gold) 55%, #8c7433 100%);
+  box-shadow: 0 1px 3px rgba(5, 9, 6, 0.6), inset 0 0 0 1px rgba(255, 244, 214, 0.35);
+}
+
+.chip .pin::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 10px;
+  width: 2px;
+  height: 6px;
+  border-radius: 0 0 1px 1px;
+  background: linear-gradient(#e9dcc0, #6f5a22);
+  transform: rotate(-24deg);
+  transform-origin: 50% 0;
+}
+
+/* The settle when a person drops a chip into a seat: one soft ivory ring. */
+.chip-settle {
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: chip-settle 520ms ease-out forwards;
+}
+
+@keyframes chip-settle {
+  0% {
+    box-shadow: 0 0 0 0 rgba(236, 223, 195, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 16px rgba(236, 223, 195, 0);
+  }
+}
+
 .pulse-ring {
   position: absolute;
   inset: -3px;
@@ -1004,8 +1083,8 @@
   color: var(--color-linen);
   font-size: 11px;
   font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
+  padding: 3px 8px;
+  border-radius: 4px;
   border: 1px solid rgba(197, 165, 94, 0.5);
   white-space: nowrap;
   pointer-events: none;
@@ -1034,8 +1113,8 @@
   color: var(--color-linen);
   font-size: 11px;
   font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 999px;
+  padding: 3px 8px;
+  border-radius: 4px;
   border: 1px solid rgba(197, 165, 94, 0.5);
   white-space: nowrap;
   pointer-events: none;
@@ -1146,30 +1225,47 @@
   position: absolute;
   left: 15px;
   top: 21px;
-  border-radius: 999px;
+  border-radius: 3px;
   background: linear-gradient(180deg, #efd89a, var(--color-gold-bright));
   border: 1px solid rgba(20, 31, 24, 0.55);
-  padding: 2px 8px;
+  padding: 2px 7px;
   color: #241d10;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-serif);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
+/* What the agent says while it works — a real speech bubble, tail and all. */
 .agent-cursor-bubble {
   position: absolute;
   left: 15px;
   top: 44px;
-  border-radius: 999px;
-  background: rgba(20, 31, 24, 0.93);
+  max-width: 340px;
+  border-radius: 7px;
+  background: rgba(20, 31, 24, 0.94);
   border: 1px solid rgba(232, 207, 143, 0.6);
-  padding: 3px 10px;
+  padding: 4px 10px 5px;
   color: var(--color-linen);
   font-size: 11.5px;
-  font-weight: 600;
-  white-space: nowrap;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: normal;
+  width: max-content;
+}
+
+.agent-cursor-bubble::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 9px;
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  border-top: 1px solid rgba(232, 207, 143, 0.6);
+  border-left: 1px solid rgba(232, 207, 143, 0.6);
+  background: rgba(20, 31, 24, 0.98);
 }
 
 .agent-ripple {
@@ -1217,7 +1313,7 @@
   font-size: 13px;
   font-weight: 600;
   padding: 6px 8px 6px 16px;
-  border-radius: 999px;
+  border-radius: 6px;
   box-shadow: 0 8px 26px rgba(4, 9, 6, 0.5);
   animation: entry-in 300ms ease;
 }
@@ -1230,7 +1326,7 @@
 
 .proposal-banner button {
   border: 0;
-  border-radius: 999px;
+  border-radius: 4px;
   padding: 5px 14px;
   font-size: 12.5px;
   font-weight: 700;
@@ -1278,12 +1374,176 @@
   font-size: 13px;
   font-weight: 700;
   padding: 8px 18px;
-  border-radius: 999px;
+  border-radius: 6px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   white-space: nowrap;
   cursor: pointer;
   animation: entry-in 300ms ease;
   transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+/* ---- a question from the agent ---------------------------------------------
+   Fixed chrome like the banners: the agent's tool call is waiting on this. */
+
+.agent-question {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 96;
+  display: flex;
+  width: min(440px, calc(100% - 200px));
+  flex-direction: column;
+  gap: 8px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(140, 116, 51, 0.5);
+  border-top: 3px solid var(--color-gold);
+  /* Square corners, like a real note card — a gold top edge wants a crisp edge. */
+  border-radius: 0;
+  background: var(--color-card);
+  padding: 10px 14px 10px;
+  color: var(--color-ink);
+  box-shadow: 0 18px 40px -12px rgba(4, 9, 6, 0.6), 0 1px 0 rgba(255, 255, 255, 0.4) inset;
+  animation: entry-in 300ms ease;
+}
+
+.agent-question.below-banner {
+  top: 62px;
+}
+
+.agent-question-kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--color-gold-ink);
+}
+
+.agent-question-text {
+  font-family: var(--font-heading);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.agent-question-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-question-options button {
+  border: 1px solid var(--color-pine-line);
+  border-radius: 4px;
+  background: var(--color-pine-800);
+  padding: 5px 12px;
+  color: var(--color-linen);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.agent-question-options button:hover {
+  background: var(--color-pine-900);
+  transform: translateY(-1px);
+}
+
+.agent-question-options button:focus-visible,
+.agent-question-free button:focus-visible,
+.agent-question-skip:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+.agent-question-free {
+  display: flex;
+  gap: 6px;
+}
+
+.agent-question-free input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--color-input);
+  border-radius: 4px;
+  background: var(--color-ivory);
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-ink);
+}
+
+.agent-question-free input:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: -1px;
+}
+
+.agent-question-free button {
+  border: 1px solid var(--color-hairline);
+  border-radius: 4px;
+  background: var(--color-card);
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-pine-800);
+}
+
+.agent-question-free button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.agent-question-skip {
+  align-self: flex-end;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--color-ink-faint);
+  font-size: 11px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--color-ink-faint) 50%, transparent);
+  text-underline-offset: 2px;
+}
+
+.agent-question-skip:hover {
+  color: var(--color-ink-soft);
+}
+
+/* ---- petals ----------------------------------------------------------------- */
+
+.petals {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.petal {
+  position: absolute;
+  top: -24px;
+  border-radius: 62% 0 62% 0;
+  opacity: 0;
+  box-shadow: inset -2px -2px 3px rgba(41, 36, 25, 0.12);
+  animation-name: petal-fall;
+  animation-timing-function: cubic-bezier(0.25, 0.1, 0.5, 1);
+  animation-fill-mode: forwards;
+}
+
+@keyframes petal-fall {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(0deg);
+  }
+  8% {
+    opacity: 0.95;
+  }
+  80% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--drift, 0px), 105vh) rotate(var(--spin, 360deg));
+  }
 }
 
 .viol-banner:hover {
@@ -1303,7 +1563,7 @@
   font-size: 16px;
   letter-spacing: 0.06em;
   padding: 7px 26px;
-  border-radius: 999px;
+  border-radius: 3px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   animation: entry-in 400ms ease;
 }
@@ -1347,7 +1607,7 @@
   .chip,
   .venue-feature,
   .table-wrap.glide,
-  .seat-dot.glide {
+  .seat-chair.glide {
     transition: none;
   }
 
@@ -1355,8 +1615,14 @@
   .table-pulse,
   .nametag.flash,
   .viol-lines path,
-  .agent-ripple {
+  .agent-ripple,
+  .chip-settle,
+  .petal {
     animation: none;
+  }
+
+  .seat-chair svg {
+    transition: none;
   }
 
   /* The choreographer already skips queuing under reduced motion; this is the belt to that suspender. */

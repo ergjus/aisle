@@ -44,6 +44,7 @@ function stateWith(tables: Table[], venueDimensions = dimensions): AisleState {
     venue: freshVenue(),
     venueDimensions,
     demoMetadata: null,
+    pinned: {},
   }
 }
 

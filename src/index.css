@@ -1,7 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/inter";
 @import "@fontsource-variable/eb-garamond";
 
 @custom-variant dark (&:is(.dark *));
@@ -14,9 +13,17 @@
  */
 
 @theme inline {
-  --font-sans: 'Inter Variable', sans-serif;
+  /*
+   * Type: a stationery pairing. Karla — a grotesque with a little quirk — for
+   * the working text; Cormorant and EB Garamond for anything that should read
+   * like a printed program; IBM Plex Mono for the drafting-table layer of
+   * numbers (feet, counts, tool names), the way dimensions are lettered on
+   * an architect's sheet.
+   */
+  --font-sans: 'Karla', 'Helvetica Neue', Arial, sans-serif;
   --font-serif: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
   --font-heading: 'EB Garamond Variable', serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
   --color-ring: var(--ring);
   --color-input: var(--input);
@@ -133,6 +140,224 @@
     line-height: 1.45;
   }
 
+  /*
+   * Paper. A fixed sheet of grain over the whole window — multiplied, so the
+   * ivory chrome reads as stock rather than a flat fill and the pine floor
+   * picks up the faintest felt. One tiled SVG, rasterized once; it never
+   * repaints or intercepts a pointer.
+   */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 400;
+    pointer-events: none;
+    opacity: 0.075;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.3 0 0 0 0 0.22 0 0 0 0.9 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23g)'/%3E%3C/svg%3E");
+    background-size: 220px 220px;
+  }
+
+  @media print {
+    body::after {
+      display: none;
+    }
+  }
+}
+
+@layer components {
+  /* Small caps in the serif — the stationery way to set a running label,
+     where a template would reach for tracked uppercase sans. */
+  .smallcaps {
+    font-family: var(--font-serif);
+    font-variant-caps: small-caps;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+  }
+
+  /* Figures set like dimensions on a drawing: mono, tabular, slightly small. */
+  .figures {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* ---- the masthead ------------------------------------------------------- */
+
+  .masthead {
+    position: relative;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-height: 54px;
+    border-bottom: 1px solid var(--color-hairline);
+    background: var(--color-ivory);
+    padding: 7px 16px 7px 18px;
+  }
+
+  /* A second, fainter rule under the first — the double line of a program's
+     running head. */
+  .masthead::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: -4px;
+    left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--color-hairline) 55%, transparent);
+    pointer-events: none;
+  }
+
+  .masthead-wordmark {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-family: var(--font-serif);
+    font-size: 30px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    line-height: 1;
+    color: var(--color-ink);
+  }
+
+  .masthead-fleuron {
+    font-size: 20px;
+    color: var(--color-gold);
+    transform: translateY(-1px);
+  }
+
+  .masthead-rule {
+    width: 1px;
+    height: 30px;
+    background: var(--color-hairline);
+  }
+
+  .masthead-icongroup {
+    display: inline-flex;
+    overflow: hidden;
+    border: 1px solid var(--color-hairline);
+    border-radius: 6px;
+    background: var(--color-card);
+  }
+
+  .masthead-icongroup button {
+    display: flex;
+    width: 30px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    color: var(--color-ink-soft);
+    font-family: var(--font-serif);
+    font-size: 19px;
+    line-height: 1;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .masthead-icongroup button + button {
+    border-left: 1px solid var(--color-hairline);
+  }
+
+  .masthead-icongroup button:hover:not(:disabled) {
+    background: var(--color-parchment);
+    color: var(--color-ink);
+  }
+
+  .masthead-icongroup button:disabled {
+    color: color-mix(in srgb, var(--color-ink-faint) 55%, transparent);
+    cursor: default;
+  }
+
+  .masthead-icongroup button:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: -2px;
+  }
+
+  /* ---- the agent's place card --------------------------------------------- */
+
+  .placecard {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    max-width: 260px;
+    border: 1px solid var(--color-hairline);
+    border-top: 2px solid var(--color-ink-faint);
+    border-radius: 3px;
+    background: var(--color-card);
+    padding: 4px 12px 5px 10px;
+    color: var(--color-ink-soft);
+    text-align: left;
+    white-space: nowrap;
+    box-shadow:
+      0 1px 0 rgba(41, 36, 29, 0.05),
+      0 8px 16px -10px rgba(41, 36, 29, 0.35);
+    transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+  }
+
+  .placecard:hover {
+    transform: translateY(-1px);
+    border-color: var(--color-gold);
+    box-shadow:
+      0 1px 0 rgba(41, 36, 29, 0.05),
+      0 12px 22px -12px rgba(41, 36, 29, 0.45);
+  }
+
+  .placecard:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  .placecard-ready { border-top-color: var(--color-ok); }
+  .placecard-live { border-top-color: var(--color-gold); }
+
+  .placecard-name {
+    max-width: 100%;
+    overflow: hidden;
+    font-family: var(--font-serif);
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--color-ink);
+    text-overflow: ellipsis;
+  }
+
+  .placecard-meta {
+    margin-top: 2px;
+    max-width: 100%;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--color-ink-faint);
+    text-overflow: ellipsis;
+  }
+
+  .placecard-dot {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--color-ink-faint);
+  }
+
+  .placecard-ready .placecard-dot { background: var(--color-ok); }
+
+  .placecard-live .placecard-dot {
+    background: var(--color-gold);
+    animation: placecard-pulse 1.8s ease-out infinite;
+  }
+
+  @keyframes placecard-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-gold) 55%, transparent); }
+    100% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--color-gold) 0%, transparent); }
+  }
+
+  @media (max-width: 900px) {
+    .placecard-meta { display: none; }
+  }
+}
+
+@layer base {
   /* Any button, link, or ARIA-button-role element reads as clickable. Drag
      handles and other elements set their own cursor (grab, row-resize…)
      with a class selector, which wins the cascade over this attribute one. */

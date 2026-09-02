@@ -4,6 +4,7 @@ import type {
   AisleState,
   Constraint,
   Guest,
+  HumanQuestion,
   PersonalizedDemoConfig,
   RSVP,
   SeatAssignment,
@@ -41,7 +42,15 @@ function emptyCore(): AisleState {
     venue: freshVenue(),
     venueDimensions: freshVenueDimensions(),
     demoMetadata: null,
+    pinned: {},
   }
+}
+
+/** A pin only means something while its guest has a seat — drop the rest. */
+function prunePins(seating: Record<string, SeatAssignment>, pinned: Record<string, true> | undefined): Record<string, true> {
+  const next: Record<string, true> = {}
+  for (const id of Object.keys(pinned ?? {})) if (seating[id]) next[id] = true
+  return next
 }
 
 function coreOf(s: StoreState): AisleState {
@@ -58,6 +67,7 @@ function coreOf(s: StoreState): AisleState {
     venue: s.venue,
     venueDimensions: s.venueDimensions,
     demoMetadata: s.demoMetadata,
+    pinned: s.pinned ?? {},
   }
 }
 
@@ -142,6 +152,10 @@ export interface StoreState extends AisleState {
   lastProposalDecision: { id: string; decision: 'keep' | 'revert'; at: number } | null
   /** Named session-only save points (agent- or console-created). */
   checkpoints: Record<string, Checkpoint>
+  /** A question the agent has asked; it sits on the canvas until answered. */
+  question: HumanQuestion | null
+  /** How the last question was answered — lets the waiting tool call read the reply. */
+  lastAnswer: { id: string; answer: string; at: number } | null
 
   snapshot: (label?: string) => void
   undo: () => boolean
@@ -172,6 +186,8 @@ export interface StoreState extends AisleState {
   removeConstraint: (id: string) => void
 
   seatGuest: (guestId: string, tableId: string, seat?: number) => { ok: boolean; seat?: number; error?: string }
+  /** Pin (or unpin) a seated guest so the solver and the agent leave them where they are. */
+  pinGuest: (guestId: string, pinned: boolean) => boolean
   unseatGuest: (guestId: string) => void
   swapGuests: (a: string, b: string) => void
   clearSeating: () => void
@@ -191,6 +207,11 @@ export interface StoreState extends AisleState {
   resolveProposal: (decision: 'keep' | 'revert', source?: 'agent' | 'you') => void
   saveCheckpoint: (name: string) => Checkpoint
   restoreCheckpoint: (name: string) => Checkpoint | null
+
+  /** The agent puts a question to the human; it appears as a card on the canvas. */
+  askHuman: (q: Omit<HumanQuestion, 'at'>) => void
+  /** The human's reply (an empty string means they skipped it). */
+  answerQuestion: (id: string, answer: string) => void
 
   setAgentConnected: () => void
   setWebmcp: (available: boolean, toolNames: string[]) => void
@@ -269,7 +290,7 @@ function loadPersisted(): AisleState {
         return [id, { ...resized, x: resized.x + dx, y: resized.y + dy }]
       }),
     ) as AisleState['venue']
-    return { ...merged, groupOrder: reconcileGroupOrder(merged) }
+    return { ...merged, groupOrder: reconcileGroupOrder(merged), pinned: prunePins(merged.seating, merged.pinned) }
   } catch {
     return emptyCore()
   }
@@ -312,6 +333,8 @@ export const useStore = create<StoreState>((set, get) => ({
   proposal: null,
   lastProposalDecision: null,
   checkpoints: {},
+  question: null,
+  lastAnswer: null,
 
   snapshot: (label = 'change') => {
     const s = get()
@@ -395,6 +418,7 @@ export const useStore = create<StoreState>((set, get) => ({
       return {
         guests: { ...st.guests, [id]: next },
         seating,
+        pinned: prunePins(seating, st.pinned),
         groupOrder: withGroup(st.groupOrder, next.group),
         finalized: false,
       }
@@ -413,6 +437,7 @@ export const useStore = create<StoreState>((set, get) => ({
       return {
         guests,
         seating,
+        pinned: prunePins(seating, st.pinned),
         guestOrder: st.guestOrder.filter((g) => g !== id),
         constraints: st.constraints.filter((c) =>
           c.type === 'zone' ? c.guestId !== id : c.a !== id && c.b !== id,
@@ -530,7 +555,7 @@ export const useStore = create<StoreState>((set, get) => ({
           unseated.push(gid)
         }
       }
-      return { tables: { ...st.tables, [id]: next }, seating, finalized: false }
+      return { tables: { ...st.tables, [id]: next }, seating, pinned: prunePins(seating, st.pinned), finalized: false }
     })
     return { unseated }
   },
@@ -548,6 +573,7 @@ export const useStore = create<StoreState>((set, get) => ({
       return {
         tables,
         seating,
+        pinned: prunePins(seating, st.pinned),
         tableOrder: st.tableOrder.filter((t) => t !== id),
         selection: st.selection?.id === id ? null : st.selection,
         finalized: false,
@@ -654,6 +680,22 @@ export const useStore = create<StoreState>((set, get) => ({
     return { ok: true, seat: target }
   },
 
+  pinGuest: (guestId, pinned) => {
+    const s = get()
+    if (!s.guests[guestId]) return false
+    // Only a seat can be pinned — a pin means "keep them exactly here".
+    if (pinned && !s.seating[guestId]) return false
+    if (Boolean(s.pinned[guestId]) === pinned) return true
+    s.snapshot(pinned ? 'pin seat' : 'unpin seat')
+    set((st) => {
+      const next = { ...st.pinned }
+      if (pinned) next[guestId] = true
+      else delete next[guestId]
+      return { pinned: next, finalized: false }
+    })
+    return true
+  },
+
   unseatGuest: (guestId) => {
     const s = get()
     if (!s.seating[guestId]) return
@@ -661,7 +703,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set((st) => {
       const seating = { ...st.seating }
       delete seating[guestId]
-      return { seating, finalized: false }
+      return { seating, pinned: prunePins(seating, st.pinned), finalized: false }
     })
   },
 
@@ -677,18 +719,18 @@ export const useStore = create<StoreState>((set, get) => ({
       else delete seating[b]
       if (sb) seating[a] = sb
       else delete seating[a]
-      return { seating, finalized: false }
+      return { seating, pinned: prunePins(seating, st.pinned), finalized: false }
     })
   },
 
   clearSeating: () => {
     get().snapshot('clear seating')
-    set({ seating: {}, finalized: false })
+    set({ seating: {}, pinned: {}, finalized: false })
   },
 
   applyArrangement: (assignments) => {
     get().snapshot('auto-arrange')
-    set({ seating: { ...assignments }, finalized: false })
+    set((st) => ({ seating: { ...assignments }, pinned: prunePins(assignments, st.pinned), finalized: false }))
   },
 
   loadSample: (sample) => {
@@ -702,6 +744,7 @@ export const useStore = create<StoreState>((set, get) => ({
       tableOrder: sample.tables.map((t) => t.id),
       constraints: sample.constraints,
       seating: {},
+      pinned: {},
       finalized: false,
       selection: null,
       groupOrder,
@@ -750,7 +793,7 @@ export const useStore = create<StoreState>((set, get) => ({
       const tables = new Set(
         moved.flatMap((id) => [current[id]?.tableId, restored[id]?.tableId]).filter(Boolean) as string[],
       )
-      set({ seating: restored, finalized: false })
+      set((st) => ({ seating: restored, pinned: prunePins(restored, st.pinned), finalized: false }))
       get().markTouched([...moved, ...tables])
       get().logActivity('proposal', 'Reverted the agent’s proposal — the room is back how it was.', source)
     } else {
@@ -770,6 +813,19 @@ export const useStore = create<StoreState>((set, get) => ({
     get().snapshot(`restore checkpoint "${name}"`)
     set({ ...structuredClone(cp.state), selection: null })
     return cp
+  },
+
+  askHuman: (q) => set({ question: { ...q, at: Date.now() }, lastAnswer: null }),
+
+  answerQuestion: (id, answer) => {
+    const q = get().question
+    if (!q || q.id !== id) return
+    set({ question: null, lastAnswer: { id, answer, at: Date.now() } })
+    get().logActivity(
+      'answer',
+      answer.trim() ? `Answered the agent: “${answer.trim()}”` : 'Skipped the agent’s question.',
+      'you',
+    )
   },
 
   setAgentConnected: () => {

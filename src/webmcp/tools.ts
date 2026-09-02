@@ -53,6 +53,42 @@ const MAX_CHOREOGRAPHY_WAIT_MS = 16000
 /** How long propose_arrangement's reply waits for the human's Keep/Revert. */
 const PROPOSAL_WAIT_MS = 30000
 
+/** How long ask_human's reply waits for the human to answer. */
+const QUESTION_WAIT_MS = 90000
+
+/** Resolves with the human's answer to question `id` ('' = skipped), or null on timeout. */
+function waitForAnswer(id: string, timeoutMs: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const read = (s: ReturnType<typeof useStore.getState>): string | undefined => {
+      if (s.question?.id === id) return undefined
+      const a = s.lastAnswer
+      // Gone without a recorded answer (e.g. a reset) — treat as skipped.
+      return a?.id === id ? a.answer : ''
+    }
+    const first = read(useStore.getState())
+    if (first !== undefined) return resolve(first)
+    let unsub: () => void = () => {}
+    const timer = setTimeout(() => {
+      unsub()
+      resolve(null)
+    }, timeoutMs)
+    unsub = useStore.subscribe((s) => {
+      const answer = read(s)
+      if (answer !== undefined) {
+        clearTimeout(timer)
+        unsub()
+        resolve(answer)
+      }
+    })
+  })
+}
+
+/** One line, short enough for the cursor's speech bubble. */
+function bubble(text: string, max = 78): string {
+  const line = text.split('\n')[0].trim()
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line
+}
+
 /** Resolves with the human's verdict on proposal `id`, or 'pending' on timeout. */
 function waitForProposalDecision(id: string, timeoutMs: number): Promise<'keep' | 'revert' | 'pending'> {
   return new Promise((resolve) => {
@@ -177,8 +213,19 @@ function roomSummary(state: AisleState): string {
       `⏳ An agent proposal (${ui.proposal.moved} move${ui.proposal.moved === 1 ? '' : 's'}) is applied and awaiting the human's Keep/Revert decision.`,
     )
   }
+  if (ui.question) {
+    lines.push(`❓ Your question to the human is still waiting for an answer: “${ui.question.text}”`)
+  }
   const checkpointNames = Object.keys(ui.checkpoints)
   if (checkpointNames.length) lines.push(`Checkpoints saved: ${checkpointNames.join(', ')} (restore_checkpoint returns to one).`)
+  const pinnedIds = Object.keys(state.pinned ?? {}).filter((id) => state.seating[id] && state.guests[id])
+  if (pinnedIds.length) {
+    lines.push(
+      `📌 Pinned by hand — do not move these (unpin_guest lifts a pin only when the human asks): ${pinnedIds
+        .map((id) => `${state.guests[id].name} at ${state.tables[state.seating[id].tableId]?.name}`)
+        .join(', ')}`,
+    )
+  }
   const units = stageUnitsPerFoot(state.venueDimensions)
   const room = roomRect(state.venueDimensions)
   lines.push(
@@ -196,7 +243,7 @@ function roomSummary(state: AisleState): string {
     const t = state.tables[tid]
     const occ = occupantsOf(state, tid)
     lines.push(
-      `${t.name} (${t.shape}, ${occ.length}/${t.seats}, center ${formatFeet((t.x - room.x) / units.x)}, ${formatFeet((t.y - room.y) / units.y)}, rotated ${Math.round(t.rotation)}°): ${occ.map((g) => state.guests[g]?.name).join(', ') || 'empty'}`,
+      `${t.name} (${t.shape}, ${occ.length}/${t.seats}, center ${formatFeet((t.x - room.x) / units.x)}, ${formatFeet((t.y - room.y) / units.y)}, rotated ${Math.round(t.rotation)}°): ${occ.map((g) => `${state.guests[g]?.name}${state.pinned?.[g] ? ' 📌' : ''}`).join(', ') || 'empty'}`,
     )
   }
   const unseated = attending.filter((id) => !state.seating[id])
@@ -285,6 +332,7 @@ const READ_GLANCES: Record<string, string> = {
   list_violations: 'Checking for drama…',
   get_chart_document: 'Compiling the seating list…',
   explain_seating: 'Consulting the seating logic…',
+  get_recent_activity: 'Catching up on what changed…',
 }
 
 function makeTool(
@@ -296,9 +344,14 @@ function makeTool(
 ): WebTool {
   return {
     name,
+    title: name.replace(/_/g, ' '),
     description,
     inputSchema,
-    annotations: { readOnlyHint: opts.readOnly ?? false, title: name.replace(/_/g, ' ') },
+    // Read-only tools can be auto-approved by the agent surface. Every reply
+    // that lists guests echoes text a person typed — names, notes, rules —
+    // so read tools are also flagged as carrying untrusted content: data for
+    // the agent to reason about, never instructions to follow.
+    annotations: { readOnlyHint: opts.readOnly ?? false, ...(opts.readOnly ? { untrustedContentHint: true } : {}) },
     execute: async (rawArgs: unknown) => {
       const store = useStore.getState()
       store.setAgentConnected()
@@ -383,6 +436,131 @@ function baseTools(): WebTool[] {
         if (!plan) return fail('Give a short plan to share.')
         return { text: `Plan shared with the human: “${plan}”`, log: plan, say: plan }
       },
+    ),
+    makeTool(
+      'ask_human',
+      'Ask the human a question and WAIT for their answer. The question appears as a card on the chart with your suggested options as buttons (and, unless you say otherwise, a box for a reply in their own words); their answer comes back in this tool\'s result. Use it when a seating decision is theirs to make — which side Grandma sits on, whether the kids get their own table, which of two trade-offs they prefer — rather than guessing. One short question at a time, with 2–4 concrete options. Waits up to ~90 seconds; if they have not answered by then the reply says so and the card stays up.',
+      obj(
+        {
+          question: str('The question, in one or two plain sentences'),
+          options: {
+            type: 'array',
+            items: { type: 'string' },
+            maxItems: 5,
+            description: 'Suggested answers shown as buttons — 2 to 4 is ideal',
+          },
+          allow_free_text: { type: 'boolean', description: 'Also offer a box for an answer in their own words (default true)' },
+        },
+        ['question'],
+      ),
+      (args) => {
+        const question = String(args.question ?? '').trim()
+        if (!question) return fail('Give the human a question to answer.')
+        if (useStore.getState().question) {
+          return fail('A question is already waiting for the human — let them answer it before asking another.')
+        }
+        const options = Array.isArray(args.options)
+          ? [...new Set(args.options.map((o) => String(o).trim()).filter(Boolean))].slice(0, 5)
+          : []
+        const allowFreeText = args.allow_free_text !== false
+        if (options.length === 0 && !allowFreeText) return fail('Offer some options, or allow a free-text answer.')
+        const id = uid()
+        useStore.getState().askHuman({ id, text: question, options, allowFreeText })
+        return {
+          text: `Asked the human: “${question}”${options.length ? ` (options: ${options.join(' / ')})` : ''}`,
+          log: `Asked: “${question}”`,
+          say: bubble(question),
+          finish: () =>
+            waitForAnswer(id, QUESTION_WAIT_MS).then((answer) => {
+              if (answer === null) {
+                return '\n\n⏳ The human has not answered yet. The question stays on the chart — get_seating_chart will note it — and you can carry on with other work meanwhile.'
+              }
+              if (answer === '') return '\n\n↩ The human skipped the question and left the decision to you.'
+              return `\n\n💬 The human answered: “${answer}”`
+            }),
+        }
+      },
+    ),
+    makeTool(
+      'point_at',
+      'Direct the human\'s eye without changing anything: your cursor flies to each named guest, table, or amenity in turn and hovers there, with your note in its speech bubble; each one glows for a moment. Use it while explaining — "this is the table under the speakers", "these two are the exes". Up to three targets per call.',
+      obj(
+        {
+          targets: {
+            type: 'array',
+            items: { type: 'string' },
+            minItems: 1,
+            maxItems: 3,
+            description: 'Guest names, table names, or amenities (entrance, dance_floor, band, bathroom, photo_booth, bar, buffet, cake_table, gift_table)',
+          },
+          note: str('What to say while pointing — one short sentence'),
+        },
+        ['targets'],
+      ),
+      (args) => {
+        const state = getCore()
+        const targets = Array.isArray(args.targets) ? args.targets.map((t) => String(t).trim()).filter(Boolean) : []
+        if (targets.length === 0) return fail('Name at least one guest, table, or amenity to point at.')
+        const ids: string[] = []
+        const labels: string[] = []
+        for (const q of targets.slice(0, 3)) {
+          const featureId = VENUE_FEATURE_IDS.find((f) => f === q.toLowerCase().replace(/[\s-]+/g, '_'))
+          if (featureId) {
+            if (!state.venue[featureId].enabled) return fail(`${state.venue[featureId].label} is hidden on the plan — nothing to point at.`)
+            ids.push(featureId)
+            labels.push(state.venue[featureId].label)
+            continue
+          }
+          const guest = resolveGuest(state, q)
+          if ('hit' in guest) {
+            ids.push(guest.hit.id)
+            labels.push(guest.hit.name)
+            continue
+          }
+          const table = resolveTable(state, q)
+          if ('hit' in table) {
+            ids.push(table.hit.id)
+            labels.push(table.hit.name)
+            continue
+          }
+          return fail(`"${q}" is not a guest, table, or amenity here. ${guest.err}`)
+        }
+        const note = String(args.note ?? '').trim()
+        return ok(
+          `Pointed at ${labels.join(', ')}${note ? ` — “${note}”` : ''}.`,
+          ids,
+          note ? bubble(note) : `Pointed at ${labels.join(', ')}.`,
+        )
+      },
+    ),
+    makeTool(
+      'get_recent_activity',
+      'What has happened on the chart lately — the shared activity feed, newest first, each entry marked "human" (done by hand) or "agent" (done by you). Call it at the start of a turn to learn what the human did since you last looked: dragged someone, added a rule, pinned a seat, answered a question. Filter to their actions with who "human".',
+      obj({
+        limit: { type: 'integer', minimum: 1, maximum: 40, description: 'How many entries to return (default 12)' },
+        who: str('Whose actions to include', { enum: ['all', 'human', 'agent'] }),
+        since_seconds: { type: 'integer', minimum: 1, maximum: 86400, description: 'Only entries from the last N seconds' },
+      }),
+      (args) => {
+        let entries = useStore.getState().agentLog
+        const who = String(args.who ?? 'all')
+        if (who === 'human') entries = entries.filter((e) => e.source === 'you')
+        if (who === 'agent') entries = entries.filter((e) => e.source === 'agent')
+        if (typeof args.since_seconds === 'number') {
+          const cutoff = Date.now() - args.since_seconds * 1000
+          entries = entries.filter((e) => e.time >= cutoff)
+        }
+        const limit = Math.max(1, Math.min(40, typeof args.limit === 'number' ? Math.round(args.limit) : 12))
+        entries = entries.slice(0, limit)
+        if (entries.length === 0) return ok(`Nothing in the activity feed${who !== 'all' || args.since_seconds ? ' for that filter' : ' yet'}.`)
+        const now = Date.now()
+        const ago = (t: number) => {
+          const sec = Math.max(0, Math.round((now - t) / 1000))
+          return sec < 60 ? `${sec}s ago` : `${Math.round(sec / 60)}m ago`
+        }
+        return ok(entries.map((e) => `${ago(e.time)} · ${e.source === 'you' ? 'human' : 'agent'} · ${e.summary}`).join('\n'))
+      },
+      { readOnly: true },
     ),
     makeTool(
       'update_venue',
@@ -1117,8 +1295,40 @@ function seatingTools(): WebTool[] {
       },
     ),
     makeTool(
+      'pin_guest',
+      'Pin a seated guest in place, so auto_arrange, propose_arrangement, and repairs leave them exactly where they are — and so your own seating tools refuse to move them. The human can pin seats too (P on a chip, or Pin seat in the guest card); use this when they say "keep her there" about someone you or they have just placed.',
+      obj({ guest: str('Guest to pin — they must be seated') }, ['guest']),
+      (args) => {
+        const state = getCore()
+        const r = resolveGuest(state, args.guest)
+        if ('err' in r) return fail(r.err)
+        const seat = state.seating[r.hit.id]
+        if (!seat) return fail(`${r.hit.name} is not seated — seat them first, then pin.`)
+        if (state.pinned[r.hit.id]) return ok(`${r.hit.name} is already pinned at ${state.tables[seat.tableId]?.name}.`)
+        useStore.getState().pinGuest(r.hit.id, true)
+        return ok(
+          `Pinned ${r.hit.name} at ${state.tables[seat.tableId]?.name}. The solver will leave them there; unpin_guest lifts it.`,
+          [r.hit.id],
+          `Pinned ${r.hit.name} at ${state.tables[seat.tableId]?.name}.`,
+        )
+      },
+    ),
+    makeTool(
+      'unpin_guest',
+      'Lift a pin so a guest can be moved again. Pins the human set are their decision — lift one only when they have asked for it.',
+      obj({ guest: str('Pinned guest to release') }, ['guest']),
+      (args) => {
+        const state = getCore()
+        const r = resolveGuest(state, args.guest)
+        if ('err' in r) return fail(r.err)
+        if (!state.pinned[r.hit.id]) return ok(`${r.hit.name} is not pinned.`)
+        useStore.getState().pinGuest(r.hit.id, false)
+        return ok(`Unpinned ${r.hit.name} — they can be moved again.`, [r.hit.id], `Unpinned ${r.hit.name}.`)
+      },
+    ),
+    makeTool(
       'seat_guest',
-      'Seat a guest at a specific table (first free seat). Fails with an explanation if the table is full. The chart animates the move so the human can follow it.',
+      'Seat a guest at a specific table (first free seat). Fails with an explanation if the table is full, or if the human has pinned that guest in place. The chart animates the move so the human can follow it.',
       obj({ guest: str('Guest to seat'), table: str('Table to seat them at') }, ['guest', 'table']),
       (args) => {
         const state = getCore()
@@ -1126,6 +1336,11 @@ function seatingTools(): WebTool[] {
         if ('err' in rg) return fail(rg.err)
         const rt = resolveTable(state, args.table)
         if ('err' in rt) return fail(rt.err)
+        if (state.pinned[rg.hit.id] && state.seating[rg.hit.id]?.tableId !== rt.hit.id) {
+          return fail(
+            `${rg.hit.name} is pinned at ${state.tables[state.seating[rg.hit.id].tableId]?.name} by the human — that seat is theirs to change, not yours. If they have asked you to move ${rg.hit.name}, call unpin_guest first.`,
+          )
+        }
         const res = useStore.getState().seatGuest(rg.hit.id, rt.hit.id)
         if (!res.ok) {
           const free = state.tableOrder
@@ -1152,6 +1367,9 @@ function seatingTools(): WebTool[] {
         const r = resolveGuest(state, args.guest)
         if ('err' in r) return fail(r.err)
         if (!state.seating[r.hit.id]) return ok(`${r.hit.name} is already unseated.`)
+        if (state.pinned[r.hit.id]) {
+          return fail(`${r.hit.name} is pinned in place by the human. Ask them, then unpin_guest before unseating.`)
+        }
         useStore.getState().unseatGuest(r.hit.id)
         return ok(`${r.hit.name} is back in the lounge.`, [r.hit.id])
       },
@@ -1167,6 +1385,10 @@ function seatingTools(): WebTool[] {
         const rb = resolveGuest(state, args.guest_b)
         if ('err' in rb) return fail(rb.err)
         if (ra.hit.id === rb.hit.id) return fail('That is the same guest twice.')
+        const pinnedOne = [ra.hit, rb.hit].find((g) => state.pinned[g.id])
+        if (pinnedOne) {
+          return fail(`${pinnedOne.name} is pinned in place by the human — swap someone else, or ask them and unpin_guest first.`)
+        }
         useStore.getState().swapGuests(ra.hit.id, rb.hit.id)
         const after = getCore()
         const where = (id: string) => (after.seating[id] ? after.tables[after.seating[id].tableId].name : 'the lounge')
@@ -1179,7 +1401,7 @@ function seatingTools(): WebTool[] {
     ),
     makeTool(
       'auto_arrange',
-      'Arrange the seating automatically, honoring every rule: couples together, feuds apart, near/far zone preferences, groups kept coherent, tables balanced. mode "full" (default) redesigns the whole room; mode "repair" fixes current violations and seats stragglers while moving as few guests as possible — use it after the human hand-moves someone into trouble. Returns a plain-language explanation of what it did and anything it could not satisfy. The chart animates the changes table by table and the reply waits for the animation, so the call may take several seconds — that is normal.',
+      'Arrange the seating automatically, honoring every rule: couples together, feuds apart, near/far zone preferences, groups kept coherent, tables balanced. mode "full" (default) redesigns the whole room; mode "repair" fixes current violations and seats stragglers while moving as few guests as possible — use it after the human hand-moves someone into trouble. Seats the human has pinned stay exactly where they are in both modes. Returns a plain-language explanation of what it did and anything it could not satisfy. The chart animates the changes table by table and the reply waits for the animation, so the call may take several seconds — that is normal.',
       obj({
         mode: str('"full" re-seats everyone; "repair" makes minimal fixes', { enum: ['full', 'repair'] }),
       }),

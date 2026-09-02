@@ -41,6 +41,7 @@ function makeState(partial: Partial<AisleState> = {}): AisleState {
     venueDimensions: freshVenueDimensions(),
     demoMetadata: null,
     ...partial,
+    pinned: partial.pinned ?? {},
   }
 }
 

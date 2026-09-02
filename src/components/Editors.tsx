@@ -85,7 +85,9 @@ function GuestEditor({ sel }: { sel: Selection }) {
         />
       </Field>
       <div className="text-xs text-ink-soft">
-        {seat ? `Seated at ${s.tables[seat.tableId]?.name}` : 'Not seated — drag their chip onto a table.'}
+        {seat
+          ? `Seated at ${s.tables[seat.tableId]?.name}${s.pinned[g.id] ? ' · pinned — the solver and the agent leave them here' : ''}`
+          : 'Not seated — drag their chip onto a table.'}
       </div>
       <div className="mt-1 flex justify-between gap-1.5">
         <Button
@@ -98,6 +100,20 @@ function GuestEditor({ sel }: { sel: Selection }) {
         >
           Remove
         </Button>
+        {seat && (
+          <Button
+            variant={s.pinned[g.id] ? 'secondary' : 'outline'}
+            size="sm"
+            title={s.pinned[g.id] ? 'Let the solver and the agent move this guest again' : 'Keep this guest exactly here through Seat Everyone, repairs, and agent moves (P)'}
+            onClick={() => {
+              const next = !s.pinned[g.id]
+              s.pinGuest(g.id, next)
+              s.logActivity('pin', next ? `Pinned ${g.name} at ${s.tables[seat.tableId]?.name}.` : `Unpinned ${g.name}.`, 'you')
+            }}
+          >
+            {s.pinned[g.id] ? 'Unpin' : 'Pin seat'}
+          </Button>
+        )}
         {seat && (
           <Button
             variant="outline"

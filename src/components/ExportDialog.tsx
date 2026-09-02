@@ -123,7 +123,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex h-[min(780px,94vh)] w-[min(1100px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+      <DialogContent className="flex h-[min(780px,94vh)] w-[min(1100px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:max-w-none">
         <DialogHeader className="border-b border-hairline px-6 py-4">
           <DialogTitle className="text-[20px]">Export the chart</DialogTitle>
           <DialogDescription>

@@ -12,9 +12,14 @@ import { Button } from '@/components/ui/button'
  */
 const GROUPS: { title: string; blurb: string; names: string[] }[] = [
   {
+    title: 'Talking to you',
+    blurb: 'The agent narrates, asks, and points — so the work is a conversation, not a flicker.',
+    names: ['share_plan', 'ask_human', 'point_at', 'wrap_up'],
+  },
+  {
     title: 'Reading the room',
     blurb: 'How the agent sees what you see — no changes, just eyes.',
-    names: ['get_seating_chart', 'list_guests', 'list_unseated', 'list_constraints', 'list_violations', 'explain_seating'],
+    names: ['get_seating_chart', 'get_recent_activity', 'list_guests', 'list_unseated', 'list_constraints', 'list_violations', 'explain_seating'],
   },
   {
     title: 'The guest list',
@@ -28,13 +33,13 @@ const GROUPS: { title: string; blurb: string; names: string[] }[] = [
   },
   {
     title: 'Seating the room',
-    blurb: 'Moving people — one chair at a time or the whole room at once.',
-    names: ['seat_guest', 'unseat_guest', 'swap_guests', 'auto_arrange', 'propose_arrangement', 'clear_seating'],
+    blurb: 'Moving people — one chair at a time or the whole room at once. Your pins are law.',
+    names: ['seat_guest', 'unseat_guest', 'swap_guests', 'pin_guest', 'unpin_guest', 'auto_arrange', 'propose_arrangement', 'clear_seating'],
   },
   {
     title: 'Safety nets',
-    blurb: 'Bold moves without fear — save points, and proposals the human rules on.',
-    names: ['save_checkpoint', 'restore_checkpoint'],
+    blurb: 'Bold moves without fear — the same undo you have, save points, and a reset that insists on being asked.',
+    names: ['undo', 'redo', 'save_checkpoint', 'restore_checkpoint', 'reset_chart'],
   },
   {
     title: 'House rules',
@@ -53,6 +58,18 @@ const GROUPS: { title: string; blurb: string; names: string[] }[] = [
   },
 ]
 
+/** Things to say to an agent that is looking at this page — each one exercises a different corner of the toolset. */
+const PROMPTS: { say: string; shows: string }[] = [
+  { say: 'Seat everyone. Keep the exes apart and put Grandma far from the band.', shows: 'auto_arrange, share_plan' },
+  { say: 'Why is Diane at that table?', shows: 'explain_seating' },
+  { say: 'Propose a bolder arrangement and let me decide.', shows: 'propose_arrangement waits for your Keep / Revert' },
+  { say: 'Ask me which side the Pembertons should sit on before you move them.', shows: 'ask_human blocks on your answer' },
+  { say: 'What did I change since you last looked? Fix anything I broke, moving as few people as possible.', shows: 'get_recent_activity, auto_arrange repair' },
+  { say: 'Keep Rosa exactly where I put her, then reseat the rest of the room.', shows: 'pin_guest, then auto_arrange around the pin' },
+  { say: 'Show me which table is under the speakers.', shows: 'point_at' },
+  { say: 'Prepare the printed seating document — title it June & Ravi.', shows: 'export_chart opens the print studio, composed' },
+]
+
 const GATE_NOTES: Record<CatalogEntry['requires'], { locked: string; open: string } | null> = {
   always: null,
   tables: { locked: 'Appears once the room has a table', open: 'Available — the room has tables' },
@@ -65,18 +82,18 @@ function ToolCard({ entry }: { entry: CatalogEntry }) {
   return (
     <article
       className={cn(
-        'rounded-xl border bg-card p-4',
+        'rounded-md border bg-card p-4',
         entry.requires === 'perfect' && 'border-gold/60',
         !entry.available && 'border-dashed bg-card/50',
       )}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <code className={cn('font-mono text-[13px] font-bold tracking-tight text-pine-800', !entry.available && 'text-ink-soft')}>
+        <code className={cn('font-mono text-[13px] font-semibold tracking-tight text-pine-800', !entry.available && 'text-ink-soft')}>
           {entry.name}
         </code>
         <span
           className={cn(
-            'rounded-full px-2 py-0.5 text-[9.5px] font-bold tracking-[0.08em] uppercase',
+            'figures rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium',
             entry.readOnly ? 'bg-sage/12 text-sage' : 'bg-gold/15 text-gold-ink',
           )}
         >
@@ -96,7 +113,7 @@ function ToolCard({ entry }: { entry: CatalogEntry }) {
               key={p.name}
               title={p.description || undefined}
               className={cn(
-                'cursor-help rounded-full border px-2 py-0.5 font-mono text-[10.5px] font-semibold',
+                'cursor-help rounded-[3px] border px-1.5 py-0.5 font-mono text-[10.5px] font-medium',
                 p.required ? 'border-gold/70 bg-gold/10 text-gold-ink' : 'border-hairline bg-parchment/60 text-ink-soft',
               )}
             >
@@ -164,7 +181,7 @@ export function ToolsPage({ onClose }: { onClose: () => void }) {
           Back to the room
         </Button>
         <div className="flex-1" />
-        <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs font-semibold whitespace-nowrap text-ink-soft">
+        <span className="inline-flex items-center gap-1.5 rounded-[3px] border bg-card px-2.5 py-1 text-xs font-semibold whitespace-nowrap text-ink-soft">
           <span
             className={cn(
               'h-2 w-2 rounded-full',
@@ -180,7 +197,7 @@ export function ToolsPage({ onClose }: { onClose: () => void }) {
       </header>
 
       <main className="mx-auto max-w-5xl px-5 pt-10 pb-16">
-        <p className="text-[11px] font-bold tracking-[0.22em] text-gold-ink uppercase">Aisle · WebMCP reference</p>
+        <p className="smallcaps text-[14px] text-gold-ink">Aisle · WebMCP reference</p>
         <h1 className="mt-1 font-serif text-[42px] leading-tight font-semibold tracking-wide">
           <span className="mr-2 text-[30px] text-gold">❦</span>The Agent&rsquo;s Toolbox
         </h1>
@@ -190,13 +207,28 @@ export function ToolsPage({ onClose }: { onClose: () => void }) {
           same chart, in real time. Every move it makes is performed in the open: the gold cursor walks the floor, chips
           glide to their chairs, and each step lands in the activity log where you can undo it.
         </p>
-        <p className="mt-2 text-[12px] text-ink-faint">
+        <p className="figures mt-2 text-[11.5px] text-ink-faint">
           {liveCount} of {catalog.length} tools live right now · hover a{' '}
-          <span className="rounded-full border border-hairline bg-parchment/60 px-1.5 py-px font-mono text-[10px] font-semibold text-ink-soft">
+          <span className="rounded-[3px] border border-hairline bg-parchment/60 px-1.5 py-px text-[10px] font-medium text-ink-soft">
             parameter
           </span>{' '}
-          to see what it takes · <span className="font-mono text-[11px]">*</span> means required
+          to see what it takes · * means required
         </p>
+
+        <section className="mt-9 rounded-md border border-hairline bg-card/70 p-5">
+          <div className="flex flex-wrap items-baseline gap-x-3">
+            <h2 className="font-serif text-[24px] font-semibold tracking-wide">Things to try saying</h2>
+            <p className="text-[12px] text-ink-faint italic">Each one reaches a different corner of the toolset.</p>
+          </div>
+          <ul className="mt-3 grid gap-x-6 gap-y-2 md:grid-cols-2">
+            {PROMPTS.map((p) => (
+              <li key={p.say} className="flex flex-col gap-0.5 border-t border-hairline/70 pt-2">
+                <span className="font-heading text-[15px] leading-snug text-ink">“{p.say}”</span>
+                <span className="figures text-[10.5px] text-ink-faint">→ {p.shows}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
 
         {grouped.map((section) => (
           <section key={section.title} className="mt-9">
@@ -212,8 +244,8 @@ export function ToolsPage({ onClose }: { onClose: () => void }) {
           </section>
         ))}
 
-        <footer className="mt-12 rounded-xl border border-hairline bg-parchment/50 p-4 text-[12px] leading-relaxed text-ink-soft">
-          <p className="font-bold tracking-[0.12em] text-ink-soft uppercase">No agent handy?</p>
+        <footer className="mt-12 rounded-md border border-hairline bg-parchment/50 p-4 text-[12px] leading-relaxed text-ink-soft">
+          <p className="smallcaps text-[14px] text-ink-soft">No agent handy?</p>
           <p className="mt-1">
             The same tools answer from this page&rsquo;s console:{' '}
             <code className="rounded bg-pine-950 px-1.5 py-0.5 font-mono text-[11px] text-linen">

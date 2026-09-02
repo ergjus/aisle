@@ -356,6 +356,7 @@ export function planPersonalizedSample(config: PersonalizedDemoConfig): Personal
     tableOrder: tables.map((table) => table.id),
     constraints: structuredClone(SAMPLE_CONSTRAINTS),
     seating: {},
+    pinned: {},
     finalized: false,
     groupOrder,
     venue,

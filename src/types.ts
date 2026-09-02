@@ -141,4 +141,21 @@ export interface AisleState {
   venueDimensions: VenueDimensions
   /** Present only while the chart is still the structurally intact personalized demo. */
   demoMetadata: PersonalizedDemoMetadata | null
+  /**
+   * Seats the human has pinned (guestId → true). A pinned guest stays exactly
+   * where they are through auto-arrange and repair, and the agent's seating
+   * tools refuse to move them — the human's hand-placed seats are law.
+   */
+  pinned: Record<string, true>
+}
+
+/** A question the agent has put to the human, waiting on the canvas for an answer. */
+export interface HumanQuestion {
+  id: string
+  text: string
+  /** Suggested answers, rendered as buttons. */
+  options: string[]
+  /** Whether a free-text reply is also accepted. */
+  allowFreeText: boolean
+  at: number
 }
