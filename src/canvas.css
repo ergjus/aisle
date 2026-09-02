@@ -58,7 +58,7 @@
 .canvas-zoom-controls button:hover:not(:disabled) { background: rgba(197, 165, 94, 0.12); }
 .canvas-zoom-controls button:focus-visible { outline: 2px solid var(--color-gold-bright); outline-offset: -3px; }
 .canvas-zoom-controls button:disabled { opacity: 0.35; cursor: default; }
-.canvas-zoom-controls .zoom-readout { color: rgba(236, 223, 195, 0.58); font-family: var(--font-mono); font-size: 10px; font-weight: 500; }
+.canvas-zoom-controls .zoom-readout { color: rgba(236, 223, 195, 0.82); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
 
 .stage {
   position: absolute;
@@ -184,7 +184,7 @@
 }
 
 .room-dims text {
-  fill: rgba(236, 223, 195, 0.7);
+  fill: rgba(236, 223, 195, 0.88);
   font-family: var(--font-mono);
   font-size: 12.5px;
   font-weight: 500;
@@ -199,9 +199,9 @@
   transform: translateX(-100%);
   border: 1px solid rgba(236, 223, 195, 0.28);
   background: rgba(20, 31, 24, 0.55);
-  color: rgba(236, 223, 195, 0.66);
+  color: rgba(236, 223, 195, 0.84);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1;
   white-space: nowrap;
   pointer-events: none;
@@ -221,10 +221,10 @@
 
 .title-block b {
   font-weight: 500;
-  font-size: 8.5px;
+  font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(236, 223, 195, 0.42);
+  color: rgba(236, 223, 195, 0.68);
 }
 
 .title-block-name {
@@ -239,7 +239,7 @@
 .title-block-name em {
   font-weight: 500;
   font-style: italic;
-  color: rgba(236, 223, 195, 0.7);
+  color: rgba(236, 223, 195, 0.86);
 }
 
 .scale-bar {
@@ -249,7 +249,7 @@
   border-top: 1px solid rgba(236, 223, 195, 0.38);
   border-right: 1px solid rgba(236, 223, 195, 0.38);
   border-left: 1px solid rgba(236, 223, 195, 0.38);
-  color: rgba(236, 223, 195, 0.48);
+  color: rgba(236, 223, 195, 0.8);
   pointer-events: none;
 }
 
@@ -258,7 +258,7 @@
   right: 0;
   top: 7px;
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 500;
 }
 
@@ -284,7 +284,7 @@
   padding: 3px 8px;
   color: rgba(174, 234, 225, 0.88);
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 500;
   pointer-events: none;
 }
@@ -405,7 +405,7 @@
 }
 
 .venue-feature.compact .zone-label {
-  font-size: 9.5px;
+  font-size: 10.5px;
   letter-spacing: 0.12em;
   text-indent: 0.12em;
   padding: 2px 8px;
@@ -435,9 +435,9 @@
   border-radius: 3px;
   background: rgba(20, 31, 24, 0.92);
   padding: 2px 7px;
-  color: rgba(236, 223, 195, 0.65);
+  color: rgba(236, 223, 195, 0.85);
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 500;
   white-space: nowrap;
   opacity: 0;
@@ -523,9 +523,9 @@
   border-radius: 3px;
   background: rgba(20, 31, 24, 0.94);
   padding: 2px 7px;
-  color: rgba(236, 223, 195, 0.66);
+  color: rgba(236, 223, 195, 0.85);
   font-family: var(--font-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 500;
   pointer-events: none;
   opacity: 0;
@@ -590,7 +590,7 @@
 .venue-feature-gift_table {
   border: 1px solid rgba(143, 160, 138, 0.4);
   background: rgba(143, 160, 138, 0.06);
-  color: rgba(236, 223, 195, 0.7);
+  color: rgba(236, 223, 195, 0.86);
 }
 
 .venue-feature-cake_table {
@@ -684,7 +684,7 @@
 .lounge-chevron {
   width: 13px;
   height: 13px;
-  color: rgba(236, 223, 195, 0.5);
+  color: rgba(236, 223, 195, 0.75);
   transition: transform 150ms ease;
 }
 
@@ -698,13 +698,13 @@
   font-weight: 600;
   font-style: italic;
   letter-spacing: 0.02em;
-  color: rgba(236, 223, 195, 0.7);
+  color: rgba(236, 223, 195, 0.88);
 }
 
 .lounge-meta {
-  color: rgba(236, 223, 195, 0.42);
+  color: rgba(236, 223, 195, 0.74);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
 }
 
@@ -720,8 +720,8 @@
 }
 
 .lounge-empty {
-  color: rgba(236, 223, 195, 0.4);
-  font-size: 11px;
+  color: rgba(236, 223, 195, 0.74);
+  font-size: 12px;
 }
 
 /* The one chip currently being dragged, rendered above both the stage and
@@ -846,7 +846,7 @@
 
 .table .t-count {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--color-ink-soft);
   pointer-events: none;
@@ -1412,7 +1412,7 @@
 
 .agent-question-kicker {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.06em;
   color: var(--color-gold-ink);
@@ -1497,8 +1497,8 @@
   border: 0;
   background: transparent;
   padding: 0;
-  color: var(--color-ink-faint);
-  font-size: 11px;
+  color: var(--color-ink-soft);
+  font-size: 11.5px;
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--color-ink-faint) 50%, transparent);
   text-underline-offset: 2px;

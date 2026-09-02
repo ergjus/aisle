@@ -51,7 +51,7 @@ export function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenC
                 {group.rows.map(([keys, what]) => (
                   <div key={keys} className="flex items-baseline justify-between gap-3 border-t border-hairline/60 py-1.5 first:border-t-0">
                     <dd className="text-[12.5px] text-ink">{what}</dd>
-                    <dt className="figures shrink-0 rounded-[3px] border border-hairline bg-parchment/70 px-1.5 py-px text-[10.5px] text-ink-soft">
+                    <dt className="figures shrink-0 rounded-[3px] border border-hairline bg-parchment/70 px-1.5 py-px text-[11px] text-ink-soft">
                       {keys}
                     </dt>
                   </div>

@@ -82,7 +82,7 @@ export default function App() {
       <div
         className={cn(
           'grid min-h-0 grid-cols-1 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none',
-          sidebarOpen ? 'md:grid-cols-[248px_minmax(0,1fr)]' : 'md:grid-cols-[34px_minmax(0,1fr)]',
+          sidebarOpen ? 'md:grid-cols-[248px_minmax(0,1fr)]' : 'md:grid-cols-[56px_minmax(0,1fr)]',
         )}
       >
         <Sidebar open={sidebarOpen} onOpenChange={setSidebar} />

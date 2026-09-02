@@ -139,7 +139,7 @@ function InlineAddPanel(props: {
       className="flex flex-col gap-1.5 rounded-md bg-parchment/70 p-2"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="smallcaps pl-0.5 text-[12.5px] text-ink-soft">
+        <span className="smallcaps pl-0.5 text-[13.5px] text-ink-soft">
           {props.title}
         </span>
         <Button variant="ghost" size="xs" onClick={() => props.onOpenChange(false)}>
@@ -182,7 +182,7 @@ function DimensionInput(props: { label: string; value: number; min: number; max:
   }
 
   return (
-    <label className="smallcaps text-[12px] text-ink-soft">
+    <label className="smallcaps text-[13px] text-ink-soft">
       {props.label}
       <Input
         className="mt-1 h-7 bg-ivory px-2 text-[11px]"
@@ -213,8 +213,8 @@ function VenueSection() {
       <Collapsible open={roomSettingsOpen} onOpenChange={setRoomSettingsOpen}>
         <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md bg-parchment/45 px-2.5 py-2 text-left hover:bg-accent">
           <span className="min-w-0 flex-1">
-            <span className="smallcaps block text-[12.5px] text-ink-soft">Room settings</span>
-            <span className="figures block truncate text-[10.5px] text-ink-faint">
+            <span className="smallcaps block text-[13.5px] text-ink-soft">Room settings</span>
+            <span className="figures block truncate text-[11.5px] text-ink-faint">
               {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)} · {s.venueDimensions.snapFt === 0 ? 'grid off' : `${formatFeet(s.venueDimensions.snapFt)} grid`}
             </span>
           </span>
@@ -230,14 +230,14 @@ function VenueSection() {
               <DimensionInput label="Length (ft)" value={s.venueDimensions.lengthFt} min={15} max={200} onCommit={(value) => s.updateVenueDimensions({ lengthFt: value })} />
             </div>
             <div className="mt-1.5 flex items-center justify-between gap-2">
-              <label className="smallcaps text-[12px] text-ink-soft" htmlFor="venue-snap">
+              <label className="smallcaps text-[13px] text-ink-soft" htmlFor="venue-snap">
                 Snap grid
               </label>
               <Select
                 value={String(s.venueDimensions.snapFt)}
                 onValueChange={(value) => s.updateVenueDimensions({ snapFt: Number(value) })}
               >
-                <SelectTrigger id="venue-snap" className="h-7 w-[92px] bg-ivory px-2 text-[10.5px]">
+                <SelectTrigger id="venue-snap" className="h-7 w-[92px] bg-ivory px-2 text-[11.5px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -249,7 +249,7 @@ function VenueSection() {
                 </SelectContent>
               </Select>
             </div>
-            <p className="mt-2 text-[10.5px] leading-snug text-ink-soft">
+            <p className="mt-2 text-[11.5px] leading-snug text-ink-soft">
               Furniture stays put when the room grows. Drag the walls on the floor plan to resize directly.
             </p>
           </div>
@@ -302,7 +302,7 @@ function VenueSection() {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[12px] font-semibold">{feature.label}</span>
-                <span className="figures block truncate text-[10px] text-ink-faint">
+                <span className="figures block truncate text-[11px] text-ink-faint">
                   {formatFeet(dimensions.w)} × {formatFeet(dimensions.h)} · {Math.round(feature.rotation)}°
                 </span>
               </span>
@@ -377,7 +377,7 @@ function TablesSection() {
           onOpenChange={setAddingTable}
         >
           <div className="flex items-center gap-1.5">
-            <span className="smallcaps shrink-0 pl-0.5 text-[12.5px] text-ink-soft">
+            <span className="smallcaps shrink-0 pl-0.5 text-[13.5px] text-ink-soft">
               Shape
             </span>
             <Select
@@ -403,7 +403,7 @@ function TablesSection() {
             </Select>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="smallcaps shrink-0 pl-0.5 text-[12.5px] text-ink-soft">
+            <span className="smallcaps shrink-0 pl-0.5 text-[13.5px] text-ink-soft">
               Seats
             </span>
             <div className="flex flex-1 items-center justify-end gap-2">
@@ -471,10 +471,10 @@ function TablesSection() {
                 aria-hidden="true"
               />
               <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{t.name}</span>
-              <span className="figures text-[10px] whitespace-nowrap text-ink-faint">
+              <span className="figures text-[11px] whitespace-nowrap text-ink-faint">
                 {formatFeet(size.w)} × {formatFeet(size.h)}
               </span>
-              <span className={cn('figures text-[10.5px] whitespace-nowrap', occ > t.seats ? 'text-brick' : 'text-ink-faint')}>
+              <span className={cn('figures text-[11.5px] whitespace-nowrap', occ > t.seats ? 'text-brick' : 'text-ink-faint')}>
                 {occ}/{t.seats}
               </span>
             </button>
@@ -512,11 +512,11 @@ function GroupBlock(props: {
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="mb-1">
       <div className="group mt-2 mb-0.5 flex items-center gap-1.5 px-1">
-        <CollapsibleTrigger className="smallcaps flex min-w-0 flex-1 items-center gap-2 rounded-md py-0.5 text-left text-[13.5px] text-ink-soft hover:bg-parchment">
+        <CollapsibleTrigger className="smallcaps flex min-w-0 flex-1 items-center gap-2 rounded-md py-0.5 text-left text-[14px] text-ink-soft hover:bg-parchment">
           <ChevronRight className={cn('h-3 w-3 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden="true" />
           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: props.color }} />
           <span className="truncate">{props.name}</span>
-          <span className="figures ml-auto shrink-0 text-[10.5px] font-normal">
+          <span className="figures ml-auto shrink-0 text-[11.5px] font-normal">
             {props.seatedTotal}/{props.attendingTotal}
           </span>
         </CollapsibleTrigger>
@@ -701,7 +701,7 @@ function GuestsSection() {
         {/* The group belongs to the guest you're adding, so it rides along in
             the same card — and creating one happens right here, in place. */}
         <div className="flex items-center gap-1.5">
-          <span className="smallcaps shrink-0 pl-0.5 text-[12.5px] text-ink-soft">
+          <span className="smallcaps shrink-0 pl-0.5 text-[13.5px] text-ink-soft">
             Group
           </span>
           <Select
@@ -802,17 +802,17 @@ function GuestsSection() {
                   {g.name}
                 </span>
                 {g.rsvp === 'pending' && (
-                  <span className="rounded-full bg-secondary px-1.5 text-[10px] font-bold whitespace-nowrap text-ink-soft">
+                  <span className="rounded-full bg-secondary px-1.5 text-[11px] font-bold whitespace-nowrap text-ink-soft">
                     rsvp?
                   </span>
                 )}
                 {g.dietary.length > 0 && (
-                  <span className="rounded-full bg-sage/15 px-1.5 text-[10px] font-bold whitespace-nowrap text-sage">
+                  <span className="rounded-full bg-sage/15 px-1.5 text-[11px] font-bold whitespace-nowrap text-sage">
                     {g.dietary[0].split(' ')[0]}
                   </span>
                 )}
                 <span
-                  className={cn('figures text-[10.5px] whitespace-nowrap text-ink-faint', !seat && g.rsvp !== 'no' && 'italic')}
+                  className={cn('figures text-[11.5px] whitespace-nowrap text-ink-faint', !seat && g.rsvp !== 'no' && 'italic')}
                 >
                   {g.rsvp === 'no' ? '—' : seat ? s.tables[seat.tableId]?.name.replace('Table ', 'T') : 'lounge'}
                 </span>
@@ -879,7 +879,7 @@ function ActivitySection() {
               )}
             />
             <div className="text-[12.5px] leading-snug text-ink">{e.summary}</div>
-            <div className="figures mt-px text-[10px] text-ink-faint">
+            <div className="figures mt-px text-[11px] text-ink-faint">
               {e.source === 'you' ? 'You' : 'Agent'} · {timeAgo(e.time)}
             </div>
           </div>
@@ -1200,7 +1200,7 @@ function SectionNavButton(props: {
           </span>
           {props.attention ? <span className="size-1.5 shrink-0 rounded-full bg-brick" aria-hidden="true" /> : null}
         </span>
-        <span className={cn('figures mt-[3px] block truncate text-[10.5px]', props.attention ? 'text-brick' : 'text-ink-faint')}>
+        <span className={cn('figures mt-[3px] block truncate text-[11.5px]', props.attention ? 'text-brick' : 'text-ink-faint')}>
           {props.summary}
         </span>
       </span>
@@ -1238,35 +1238,48 @@ function CollapseToggle(props: { open: boolean; onClick: () => void }) {
  * on that section, so getting to the guest list is one click, not two.
  */
 function SidebarRail(props: {
+  active: SectionId
   onExpand: () => void
   onOpenSection: (id: SectionId) => void
   counts: Record<SectionId, ReactNode>
+  attention: boolean
 }) {
   return (
     <aside
       id="sidebar-panel"
-      className="hidden min-h-0 flex-col items-center gap-1 overflow-hidden border-r border-hairline bg-ivory px-1 pt-1 pb-2 md:flex"
+      className="hidden min-h-0 flex-col items-center overflow-hidden border-r border-hairline bg-ivory px-1.5 pt-1 pb-3 md:flex"
     >
       <CollapseToggle open={false} onClick={props.onExpand} />
-      <div className="mt-1 flex min-h-0 flex-col items-center gap-1 overflow-hidden">
-        {SECTIONS.map(({ id, title, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            className="relative flex size-7 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-accent hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-            aria-label={`Open ${title}`}
-            title={`Open ${title}`}
-            onClick={() => props.onOpenSection(id)}
-          >
-            <Icon className="size-3.5" aria-hidden="true" />
-            {props.counts[id] ? (
-              <span className="absolute -right-0.5 -bottom-0.5 min-w-3 rounded-full bg-pine-900 px-0.5 text-center text-[7px] font-bold leading-3 text-gold-bright">
-                {props.counts[id]}
+      {/* Each section keeps its icon and its count, set as a legible pair
+          rather than a badge riding on a corner; the section that will open
+          is marked the same way as in the full sidebar — by a shift in the paper. */}
+      <nav className="mt-2 flex min-h-0 flex-col items-center gap-1 overflow-hidden" aria-label="Plan sections">
+        {SECTIONS.map(({ id, title, icon: Icon }) => {
+          const warn = id === 'rules' && props.attention
+          return (
+            <button
+              key={id}
+              type="button"
+              className={cn(
+                'flex w-11 shrink-0 flex-col items-center gap-[3px] rounded-md py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                props.active === id ? 'bg-parchment text-ink' : 'text-ink-soft hover:bg-parchment/60 hover:text-ink',
+              )}
+              aria-label={`Open ${title}`}
+              title={`Open ${title}`}
+              onClick={() => props.onOpenSection(id)}
+            >
+              <Icon className="size-[15px]" aria-hidden="true" strokeWidth={1.75} />
+              <span className={cn('figures text-[10.5px] leading-none', warn ? 'font-semibold text-brick' : 'text-ink-faint')}>
+                {props.counts[id] || '–'}
               </span>
-            ) : null}
-          </button>
-        ))}
-      </div>
+            </button>
+          )
+        })}
+      </nav>
+      <div className="min-h-2 flex-1" />
+      <span className="smallcaps shrink-0 text-[13px] text-ink-faint [writing-mode:vertical-rl] rotate-180" aria-hidden="true">
+        The plan
+      </span>
     </aside>
   )
 }
@@ -1309,6 +1322,8 @@ export function Sidebar({ open: sidebarOpen, onOpenChange }: { open: boolean; on
   if (!sidebarOpen) {
     return (
       <SidebarRail
+        active={activeSection}
+        attention={brokenCount > 0}
         counts={counts}
         onExpand={() => onOpenChange(true)}
         onOpenSection={(id) => {
@@ -1327,7 +1342,7 @@ export function Sidebar({ open: sidebarOpen, onOpenChange }: { open: boolean; on
       {/* A slim rail of its own above the sections, so the control sits in the
           same place whether the sidebar is open or folded away. */}
       <div className="mb-0.5 flex shrink-0 items-center justify-between gap-2 border-b border-hairline/70 pb-1">
-        <span className="smallcaps pl-1 text-[13px] text-ink-faint">The plan</span>
+        <span className="smallcaps pl-1 text-[13.5px] text-ink-faint">The plan</span>
         <CollapseToggle open onClick={() => onOpenChange(false)} />
       </div>
       <nav className="flex shrink-0 flex-col gap-0.5 border-b border-hairline/70 px-0.5 py-1" aria-label="Plan sections">
@@ -1356,7 +1371,7 @@ export function Sidebar({ open: sidebarOpen, onOpenChange }: { open: boolean; on
         {activeSection === 'activity' ? (
           <div className="flex flex-col gap-1 pt-1">
             <div className="sticky top-0 z-10 -mx-1 flex items-center justify-between gap-2 bg-ivory px-2 py-1.5">
-              <span className="smallcaps text-[12.5px] text-ink-soft">Recent activity</span>
+              <span className="smallcaps text-[13.5px] text-ink-soft">Recent activity</span>
               {s.agentLog.length > 0 ? (
                 <Button
                   variant="ghost"

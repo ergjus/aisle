@@ -44,10 +44,10 @@ export function DramaMeter({ score, broken }: { score: number; broken: number })
         <circle cx="33" cy="34" r="1.2" fill="var(--color-gold-bright)" />
       </svg>
       <div className="flex flex-col leading-none">
-        <span className="smallcaps text-[12px] text-ink-faint">Drama meter</span>
+        <span className="smallcaps text-[13px] text-ink-soft">Drama meter</span>
         <span className="mt-0.5 font-serif text-[18px] leading-none font-semibold italic text-ink">
           {dramaLabel(score)}
-          {broken > 0 && <span className="figures ml-1.5 text-[10.5px] font-medium not-italic text-brick">{broken} broken</span>}
+          {broken > 0 && <span className="figures ml-1.5 text-[11px] font-medium not-italic text-brick">{broken} broken</span>}
         </span>
       </div>
     </div>

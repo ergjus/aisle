@@ -93,7 +93,7 @@ function ToolCard({ entry }: { entry: CatalogEntry }) {
         </code>
         <span
           className={cn(
-            'figures rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium',
+            'figures rounded-[3px] px-1.5 py-0.5 text-[11px] font-medium',
             entry.readOnly ? 'bg-sage/12 text-sage' : 'bg-gold/15 text-gold-ink',
           )}
         >
@@ -113,7 +113,7 @@ function ToolCard({ entry }: { entry: CatalogEntry }) {
               key={p.name}
               title={p.description || undefined}
               className={cn(
-                'cursor-help rounded-[3px] border px-1.5 py-0.5 font-mono text-[10.5px] font-medium',
+                'cursor-help rounded-[3px] border px-1.5 py-0.5 font-mono text-[11.5px] font-medium',
                 p.required ? 'border-gold/70 bg-gold/10 text-gold-ink' : 'border-hairline bg-parchment/60 text-ink-soft',
               )}
             >
@@ -207,9 +207,9 @@ export function ToolsPage({ onClose }: { onClose: () => void }) {
           same chart, in real time. Every move it makes is performed in the open: the gold cursor walks the floor, chips
           glide to their chairs, and each step lands in the activity log where you can undo it.
         </p>
-        <p className="figures mt-2 text-[11.5px] text-ink-faint">
+        <p className="figures mt-2 text-[12px] text-ink-soft">
           {liveCount} of {catalog.length} tools live right now · hover a{' '}
-          <span className="rounded-[3px] border border-hairline bg-parchment/60 px-1.5 py-px text-[10px] font-medium text-ink-soft">
+          <span className="rounded-[3px] border border-hairline bg-parchment/60 px-1.5 py-px text-[11px] font-medium text-ink-soft">
             parameter
           </span>{' '}
           to see what it takes · * means required
@@ -218,13 +218,13 @@ export function ToolsPage({ onClose }: { onClose: () => void }) {
         <section className="mt-9 rounded-md border border-hairline bg-card/70 p-5">
           <div className="flex flex-wrap items-baseline gap-x-3">
             <h2 className="font-serif text-[24px] font-semibold tracking-wide">Things to try saying</h2>
-            <p className="text-[12px] text-ink-faint italic">Each one reaches a different corner of the toolset.</p>
+            <p className="text-[12.5px] text-ink-soft italic">Each one reaches a different corner of the toolset.</p>
           </div>
           <ul className="mt-3 grid gap-x-6 gap-y-2 md:grid-cols-2">
             {PROMPTS.map((p) => (
               <li key={p.say} className="flex flex-col gap-0.5 border-t border-hairline/70 pt-2">
                 <span className="font-heading text-[15px] leading-snug text-ink">“{p.say}”</span>
-                <span className="figures text-[10.5px] text-ink-faint">→ {p.shows}</span>
+                <span className="figures text-[11.5px] text-ink-faint">→ {p.shows}</span>
               </li>
             ))}
           </ul>
@@ -234,7 +234,7 @@ export function ToolsPage({ onClose }: { onClose: () => void }) {
           <section key={section.title} className="mt-9">
             <div className="flex flex-wrap items-baseline gap-x-3">
               <h2 className="font-serif text-[24px] font-semibold tracking-wide">{section.title}</h2>
-              <p className="text-[12px] text-ink-faint italic">{section.blurb}</p>
+              <p className="text-[12.5px] text-ink-soft italic">{section.blurb}</p>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               {section.entries.map((entry) => (

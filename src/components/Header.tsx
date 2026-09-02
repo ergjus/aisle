@@ -94,8 +94,8 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
         </h1>
         <div className="masthead-rule" aria-hidden="true" />
         <div className="hidden min-w-0 flex-col leading-none lg:flex">
-          <span className="smallcaps text-[12px] text-ink-faint">On the chart</span>
-          <span className="figures mt-0.5 truncate text-[11.5px] text-ink-soft">{dateline}</span>
+          <span className="smallcaps text-[13px] text-ink-soft">On the chart</span>
+          <span className="figures mt-0.5 truncate text-[12px] text-ink-soft">{dateline}</span>
         </div>
         <div className="masthead-rule hidden lg:block" aria-hidden="true" />
         <DramaMeter score={score} broken={violations.length} />

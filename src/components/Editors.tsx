@@ -21,7 +21,7 @@ function clampPos(at: { x: number; y: number }, w = 264, h = 340) {
 
 function Field(props: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex min-w-0 flex-1 flex-col gap-1 text-[10.5px] font-bold tracking-[0.1em] text-ink-soft uppercase">
+    <label className="flex min-w-0 flex-1 flex-col gap-1 smallcaps text-[13px] text-ink-soft">
       {props.label}
       {props.children}
     </label>

@@ -52,22 +52,26 @@
   /* Aisle's own palette, as first-class utilities (bg-pine-900, text-gold…) */
   --color-ivory: #f2ecdf;
   --color-parchment: #e7dfcb;
+  /* Three inks, all readable on ivory at small sizes: ink 11:1, soft 6:1,
+     faint 4.6:1 (WCAG AA). Faint is for captions, never for anything the
+     eye has to find; hairline stays light because it is only ever a rule. */
   --color-ink: #29241d;
-  --color-ink-soft: #7a7060;
-  --color-ink-faint: #a99e8a;
+  --color-ink-soft: #5f5546;
+  --color-ink-faint: #746a58;
   --color-hairline: #d8cdb2;
   --color-pine-950: #141f18;
   --color-pine-900: #1c2b21;
   --color-pine-800: #24352a;
   --color-pine-line: #35493a;
   --color-linen: #ecdfc3;
-  --color-linen-dim: #8fa08a;
+  --color-linen-dim: #a9b7a3;
   --color-gold: #c5a55e;
   --color-gold-bright: #e8cf8f;
-  --color-gold-ink: #8c7433;
-  --color-brick: #c05b4d;
+  /* Text-safe versions of the accents: 4.8–5.1:1 on ivory. */
+  --color-gold-ink: #7a6329;
+  --color-brick: #a84a3d;
   --color-ok: #7d9b6a;
-  --color-sage: #5d7a4c;
+  --color-sage: #4f6a40;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -102,10 +106,10 @@
   --secondary: #e7dfcb;
   --secondary-foreground: #29241d;
   --muted: #e7dfcb;
-  --muted-foreground: #7a7060;
+  --muted-foreground: #5f5546;
   --accent: #e3ddc7;
   --accent-foreground: #1c2b21;
-  --destructive: #b1523f;
+  --destructive: #a84a3d;
   --border: #d8cdb2;
   --input: #cdc0a1;
   --ring: #5d7a4c;
@@ -152,7 +156,8 @@
     inset: 0;
     z-index: 400;
     pointer-events: none;
-    opacity: 0.075;
+    /* Kept faint on purpose: grain over text costs legibility fast. */
+    opacity: 0.045;
     mix-blend-mode: multiply;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.3 0 0 0 0 0.22 0 0 0 0.9 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23g)'/%3E%3C/svg%3E");
     background-size: 220px 220px;
@@ -171,7 +176,9 @@
   .smallcaps {
     font-family: var(--font-serif);
     font-variant-caps: small-caps;
-    font-weight: 600;
+    /* Cormorant runs light and small on the x-height; bold and a size up
+       is what keeps a 13px running head readable. */
+    font-weight: 700;
     letter-spacing: 0.06em;
   }
 
@@ -327,8 +334,8 @@
     max-width: 100%;
     overflow: hidden;
     font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--color-ink-faint);
+    font-size: 11px;
+    color: var(--color-ink-soft);
     text-overflow: ellipsis;
   }
 

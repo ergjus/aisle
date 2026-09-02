@@ -97,7 +97,7 @@ export function HeaderMenu({ entries, label = 'More' }: { entries: MenuEntry[]; 
                 }}
               >
                 <span>{entry.label}</span>
-                {entry.hint && <span className="figures text-[10.5px] text-ink-faint">{entry.hint}</span>}
+                {entry.hint && <span className="figures text-[11px] text-ink-soft">{entry.hint}</span>}
               </button>
             ),
           )}
