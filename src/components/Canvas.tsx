@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store'
 import type { Guest, Table, VenueDimensions, VenueFeature, VenueFeatureId } from '../types'
 import {
@@ -227,7 +228,43 @@ function readPersistedBool(key: string, fallback: boolean): boolean {
 }
 
 export function Canvas() {
-  const s = useStore()
+  const s = useStore(useShallow((state) => ({
+    layoutVersion: state.layoutVersion,
+    guests: state.guests,
+    guestOrder: state.guestOrder,
+    tables: state.tables,
+    tableOrder: state.tableOrder,
+    constraints: state.constraints,
+    seating: state.seating,
+    finalized: state.finalized,
+    groupOrder: state.groupOrder,
+    venue: state.venue,
+    venueDimensions: state.venueDimensions,
+    demoMetadata: state.demoMetadata,
+    pinned: state.pinned,
+    agentConnected: state.agentConnected,
+    touched: state.touched,
+    selection: state.selection,
+    ruleHighlight: state.ruleHighlight,
+    undoStack: state.undoStack,
+    proposal: state.proposal,
+    question: state.question,
+    addTable: state.addTable,
+    answerQuestion: state.answerQuestion,
+    loadSample: state.loadSample,
+    logActivity: state.logActivity,
+    moveTable: state.moveTable,
+    pinGuest: state.pinGuest,
+    resolveProposal: state.resolveProposal,
+    seatGuest: state.seatGuest,
+    setSelection: state.setSelection,
+    setToast: state.setToast,
+    snapshot: state.snapshot,
+    unseatGuest: state.unseatGuest,
+    updateTable: state.updateTable,
+    updateVenueDimensions: state.updateVenueDimensions,
+    updateVenueFeature: state.updateVenueFeature,
+  })))
   const wrapRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const loungeRef = useRef<HTMLDivElement>(null)
@@ -371,8 +408,11 @@ export function Canvas() {
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  const colors = useMemo(() => groupColors(s), [s.guests, s.guestOrder])
-  const violations = useMemo(() => computeViolations(s), [s.guests, s.tables, s.seating, s.constraints, s.tableOrder, s.guestOrder, s.venue])
+  const colors = useMemo(() => groupColors(s), [s.guests, s.guestOrder, s.groupOrder])
+  const violations = useMemo(
+    () => computeViolations(s),
+    [s.guests, s.tables, s.seating, s.constraints, s.tableOrder, s.guestOrder, s.venue, s.venueDimensions],
+  )
 
   const violatedGuests = useMemo(() => {
     const set = new Set<string>()

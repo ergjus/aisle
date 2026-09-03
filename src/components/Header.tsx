@@ -1,17 +1,19 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Printer } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store'
 import { computeViolations, dramaScore } from '../constraints'
 import { formatFeet } from '../geometry'
-import { ToolsPage } from './ToolsPage'
-import { ExportDialog } from './ExportDialog'
 import { SAMPLE } from '../sample'
 import { seatEveryone } from '../actions'
 import { DramaMeter } from './DramaMeter'
 import { HeaderMenu, type MenuEntry } from './HeaderMenu'
-import { ShortcutsDialog } from './ShortcutsDialog'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+
+const ToolsPage = lazy(() => import('./ToolsPage').then((module) => ({ default: module.ToolsPage })))
+const ExportDialog = lazy(() => import('./ExportDialog').then((module) => ({ default: module.ExportDialog })))
+const ShortcutsDialog = lazy(() => import('./ShortcutsDialog').then((module) => ({ default: module.ShortcutsDialog })))
 
 /**
  * The masthead. Reads like the top of a printed program — the wordmark, a
@@ -20,11 +22,31 @@ import { Button } from '@/components/ui/button'
  * lives behind the ⋯ menu.
  */
 export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
-  const s = useStore()
+  const s = useStore(useShallow((state) => {
+    const violations = computeViolations(state)
+    return {
+      constraints: state.constraints,
+      demoMetadata: state.demoMetadata,
+      exportOpen: state.exportOpen,
+      guestOrder: state.guestOrder,
+      guests: state.guests,
+      loadSample: state.loadSample,
+      logActivity: state.logActivity,
+      redo: state.redo,
+      redoStack: state.redoStack,
+      requestExport: state.requestExport,
+      resetAll: state.resetAll,
+      setExportOpen: state.setExportOpen,
+      tableOrder: state.tableOrder,
+      undo: state.undo,
+      undoStack: state.undoStack,
+      venueDimensions: state.venueDimensions,
+      violationCount: violations.length,
+      dramaScore: dramaScore(violations),
+    }
+  }))
   const [showTools, setShowTools] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
-  const violations = computeViolations(s)
-  const score = dramaScore(violations)
   const empty = s.guestOrder.length === 0 && s.tableOrder.length === 0
   const attending = s.guestOrder.filter((id) => s.guests[id].rsvp !== 'no')
   const canArrange = attending.length > 0 && s.tableOrder.length > 0
@@ -98,7 +120,7 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
           <span className="figures mt-0.5 truncate text-[12px] text-ink-soft">{dateline}</span>
         </div>
         <div className="masthead-rule hidden lg:block" aria-hidden="true" />
-        <DramaMeter score={score} broken={violations.length} />
+        <DramaMeter score={s.dramaScore} broken={s.violationCount} />
       </div>
 
       <div className="min-w-2 flex-1" />
@@ -138,9 +160,11 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
         <HeaderMenu entries={menu} />
       </div>
 
-      {showTools && <ToolsPage onClose={() => setShowTools(false)} />}
-      {s.exportOpen && <ExportDialog onClose={() => s.setExportOpen(false)} />}
-      <ShortcutsDialog open={showShortcuts} onOpenChange={setShowShortcuts} />
+      <Suspense fallback={null}>
+        {showTools && <ToolsPage onClose={() => setShowTools(false)} />}
+        {s.exportOpen && <ExportDialog onClose={() => s.setExportOpen(false)} />}
+        {showShortcuts && <ShortcutsDialog open onOpenChange={setShowShortcuts} />}
+      </Suspense>
     </header>
   )
 }

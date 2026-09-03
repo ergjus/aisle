@@ -162,6 +162,25 @@ describe('chartCSV', () => {
     expect(lines[1]).toBe('"Ana ""Banana"", Jr.",Guests,yes,vegan; gluten-free,Head Table,3')
     expect(lines[2]).toBe('Ben,Guests,no,,,')
   })
+
+  it('keeps formula-like guest data inert in spreadsheet apps', () => {
+    const s = makeState({
+      guests: {
+        a: guest('a', '=HYPERLINK("https://example.test")', {
+          group: '+Guests',
+          dietary: ['-cmd', '@mention'],
+        }),
+        b: guest('b', '@mention'),
+      },
+      tables: { t1: table('t1', '=Head Table') },
+      seating: { a: { tableId: 't1', seat: 0 } },
+    })
+
+    expect(chartCSV(s).trimEnd().split('\n')[1]).toBe(
+      '"\'=HYPERLINK(""https://example.test"")",\'+Guests,yes,\'-cmd; @mention,\'=Head Table,1',
+    )
+    expect(chartCSV(s).trimEnd().split('\n')[2]).toBe("'@mention,Guests,yes,,,")
+  })
 })
 
 describe('paginateColumns', () => {

@@ -2,8 +2,8 @@
 
 **A wedding seating chart that you and your AI agent plan together — live, on the same canvas.**
 
-- 🔗 **Live app:** [aisle-ergjus-projects.vercel.app](https://aisle-ergjus-projects.vercel.app)
-- 🎬 **Demo video:** _add the 3-minute YouTube link here before submitting_
+- 🔗 **Live app:** [aisle-three.vercel.app](https://aisle-three.vercel.app/)
+- 🎬 **Demo video:** [Watch on YouTube](https://youtu.be/iI_ZaFHdqmE)
 - 🧩 Built on [WebMCP](https://github.com/webmachinelearning/webmcp) for **The WebMCP Challenge** (OpenAI)
 - 📄 [MIT licensed](LICENSE) · no backend, no login — state lives in your browser
 
@@ -34,7 +34,7 @@ No API keys, no server, no bespoke integration. Open the page in an agent-enable
 
 ## Try it in 90 seconds
 
-1. Open the [live app](https://aisle-ergjus-projects.vercel.app) in an agent-enabled browser (see [Testing with an agent](#testing-with-an-agent)).
+1. Open the [live app](https://aisle-three.vercel.app/) in an agent-enabled browser (see [Testing with an agent](#testing-with-an-agent)).
 2. First visit? A short **welcome guide** asks about your venue and builds a personalized room. Or skip it and click **Load Sample Wedding** — 72 guests, 10 tables, and 17 rules including a divorce, an ex-couple, a neighborly fence war, and a grandmother who hates loud speakers.
 3. Ask your agent: *"Seat everyone. Keep the exes apart and put Grandma far from the band."*
 4. Watch the room arrange itself, with a plain-language explanation of every trade-off.

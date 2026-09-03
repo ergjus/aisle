@@ -550,7 +550,10 @@ export function buildDocModel(state: AisleState, options: ExportOptions): DocMod
 // ---- flat data formats -----------------------------------------------------
 
 function csvCell(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+  // Spreadsheet apps interpret these leading characters as formulas. Keep
+  // exported user data inert while preserving the visible cell value.
+  const safeValue = /^[=+\-@]/.test(value) ? `'${value}` : value
+  return /[",\r\n]/.test(safeValue) ? `"${safeValue.replace(/"/g, '""')}"` : safeValue
 }
 
 /** Every guest as a spreadsheet row — including declined ones, table blank. */

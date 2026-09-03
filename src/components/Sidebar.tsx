@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, History, MapPin, Plus, ShieldCheck, Table2, Users, type LucideIcon } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store'
 import { groupColors, parseGuestEntries } from '../utils'
 import { SPREADSHEET_ACCEPT, SpreadsheetError, readSpreadsheet } from '../import/spreadsheet'
@@ -202,7 +203,13 @@ function DimensionInput(props: { label: string; value: number; min: number; max:
 }
 
 function VenueSection() {
-  const s = useStore()
+  const s = useStore(useShallow((state) => ({
+    venue: state.venue,
+    venueDimensions: state.venueDimensions,
+    updateVenueDimensions: state.updateVenueDimensions,
+    updateVenueFeature: state.updateVenueFeature,
+    logActivity: state.logActivity,
+  })))
   const [addingFeature, setAddingFeature] = useState(false)
   const [roomSettingsOpen, setRoomSettingsOpen] = useState(false)
   const enabledFeatures = VENUE_FEATURES.filter(({ id }) => s.venue[id].enabled)
@@ -338,7 +345,20 @@ const TABLE_SHAPE_ITEMS = [
  * the store finds each new table a clear patch of floor.
  */
 function TablesSection() {
-  const s = useStore()
+  const s = useStore(useShallow((state) => ({
+    guestOrder: state.guestOrder,
+    guests: state.guests,
+    seating: state.seating,
+    tableOrder: state.tableOrder,
+    tables: state.tables,
+    venueDimensions: state.venueDimensions,
+    addTable: state.addTable,
+    logActivity: state.logActivity,
+    removeTable: state.removeTable,
+    setSelection: state.setSelection,
+    setToast: state.setToast,
+    snapshot: state.snapshot,
+  })))
   const [addingTable, setAddingTable] = useState(false)
   const [shape, setShape] = useState<TableShape>('round')
   const [seats, setSeats] = useState(8)
@@ -507,7 +527,8 @@ function GroupBlock(props: {
   removable: boolean
   children: ReactNode
 }) {
-  const s = useStore()
+  const logActivity = useStore((state) => state.logActivity)
+  const removeGroup = useStore((state) => state.removeGroup)
   const [open, setOpen] = usePersistedOpen(`aisle:group:${props.name}`, true)
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="mb-1">
@@ -526,8 +547,8 @@ function GroupBlock(props: {
             title={`Remove empty group "${props.name}"`}
             aria-label={`Remove empty group ${props.name}`}
             onClick={() => {
-              s.logActivity('remove group', `Removed empty group "${props.name}".`, 'you')
-              s.removeGroup(props.name)
+              logActivity('remove group', `Removed empty group "${props.name}".`, 'you')
+              removeGroup(props.name)
             }}
           >
             ×
@@ -544,12 +565,13 @@ function GroupBlock(props: {
  * picker or from the “New group” row at the foot of the list.
  */
 function NewGroupRow(props: { onCreated?: (name: string) => void; onClose: () => void }) {
-  const s = useStore()
+  const addGroup = useStore((state) => state.addGroup)
+  const logActivity = useStore((state) => state.logActivity)
   const [name, setName] = useState('')
   const submit = () => {
-    const added = s.addGroup(name)
+    const added = addGroup(name)
     if (!added) return
-    s.logActivity('add group', `Added group "${added}".`, 'you')
+    logActivity('add group', `Added group "${added}".`, 'you')
     props.onCreated?.(added)
     props.onClose()
   }
@@ -857,10 +879,10 @@ function timeAgo(t: number): string {
 }
 
 function ActivitySection() {
-  const s = useStore()
+  const agentLog = useStore((state) => state.agentLog)
   return (
     <>
-      {s.agentLog.length === 0 && (
+      {agentLog.length === 0 && (
         <p className="my-1.5 px-1 text-[12.5px] text-ink-soft">
           Every step lands here — yours and your agent's. Seat someone, or ask your agent to arrange the room.
         </p>
@@ -869,7 +891,7 @@ function ActivitySection() {
           per entry (gold = agent, open = you), the sentence itself as the
           content, and one faint who·when line beneath. */}
       <div className="ml-[5px] flex flex-col border-l border-ink-faint/25 pr-0.5">
-        {s.agentLog.map((e) => (
+        {agentLog.map((e) => (
           <div key={e.id} className="animate-in fade-in slide-in-from-top-1 relative py-[5px] pl-3.5">
             <span
               aria-hidden="true"
@@ -914,10 +936,11 @@ function GuestPicker(props: {
   exclude?: string
   autoFocus?: boolean
 }) {
-  const s = useStore()
-  const items = s.guestOrder
+  const guestOrder = useStore((state) => state.guestOrder)
+  const guests = useStore((state) => state.guests)
+  const items = guestOrder
     .filter((id) => id !== props.exclude)
-    .map((id) => ({ value: id, label: s.guests[id].name }))
+    .map((id) => ({ value: id, label: guests[id].name }))
   const selected = items.find((i) => i.value === props.value) ?? null
   return (
     <Combobox items={items} value={selected} onValueChange={(item) => props.onChange(item?.value ?? '')}>
@@ -1285,10 +1308,31 @@ function SidebarRail(props: {
 }
 
 export function Sidebar({ open: sidebarOpen, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const s = useStore()
+  const s = useStore(useShallow((state) => {
+    let brokenCount = 0
+    let pendingRuleCount = 0
+    for (const constraint of state.constraints) {
+      const status = constraintStatus(state, constraint)
+      if (status === 'violated') brokenCount++
+      else if (status === 'pending') pendingRuleCount++
+    }
+    return {
+      agentLog: state.agentLog,
+      clearActivity: state.clearActivity,
+      constraints: state.constraints,
+      guestOrder: state.guestOrder,
+      guests: state.guests,
+      tableOrder: state.tableOrder,
+      tables: state.tables,
+      venue: state.venue,
+      venueDimensions: state.venueDimensions,
+      brokenCount,
+      pendingRuleCount,
+      setToast: state.setToast,
+    }
+  }))
   const [activeSection, setActiveSection] = usePersistedSection('aisle:sidebar:active', 'guests')
-  const brokenCount = s.constraints.filter((c) => constraintStatus(s, c) === 'violated').length
-  const pendingRuleCount = s.constraints.filter((c) => constraintStatus(s, c) === 'pending').length
+  const { brokenCount, pendingRuleCount } = s
   const enabledVenueCount = Object.values(s.venue).filter((feature) => feature.enabled).length
   const attendingCount = s.guestOrder.filter((id) => s.guests[id].rsvp !== 'no').length
   const capacity = s.tableOrder.reduce((sum, id) => sum + s.tables[id].seats, 0)
