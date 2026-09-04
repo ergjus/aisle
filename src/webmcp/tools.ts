@@ -1679,6 +1679,10 @@ function toolFlags(state: AisleState) {
   }
 }
 
+function toolSignature(flags: ReturnType<typeof toolFlags>): string {
+  return `${flags.hasTables}|${flags.hasContent}|${flags.canFinalize}`
+}
+
 export function currentTools(): WebTool[] {
   const flags = toolFlags(getCore())
   return [
@@ -1752,12 +1756,21 @@ export function initWebMCP(): void {
     }
   }
 
+  let lastSig = toolSignature(toolFlags(getCore()))
   apply()
 
-  let lastSig = ''
-  useStore.subscribe((s) => {
+  useStore.subscribe((s, previous) => {
+    if (
+      s.guestOrder === previous.guestOrder &&
+      s.guests === previous.guests &&
+      s.tableOrder === previous.tableOrder &&
+      s.tables === previous.tables &&
+      s.constraints === previous.constraints &&
+      s.seating === previous.seating &&
+      s.venue === previous.venue
+    ) return
     const flags = toolFlags(s)
-    const sig = `${flags.hasTables}|${flags.hasContent}|${flags.canFinalize}`
+    const sig = toolSignature(flags)
     if (sig !== lastSig) {
       lastSig = sig
       apply()

@@ -175,7 +175,7 @@ aisle.call('wrap_up', { summary: 'Everyone is seated and both feuds are resolved
 npm install
 npm run dev     # http://localhost:5173
 npm run build   # static build in dist/
-npm test        # 122 tests across 14 files (Vitest + Testing Library)
+npm test        # 125 tests across 15 files (Vitest + Testing Library)
 ```
 
 Vite + React 19 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. No backend; deploys as a static site (this repo auto-deploys to Vercel on push).

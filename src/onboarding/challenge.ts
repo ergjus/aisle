@@ -4,19 +4,19 @@ import type { AisleState, Constraint, DemoPriority } from '../types'
 import { zoneBands } from '../geometry'
 import type { ChallengeStep } from './storage'
 
-export const CHALLENGE_CONSTRAINT_IDS: Record<DemoPriority, string> = {
+const CHALLENGE_CONSTRAINT_IDS: Record<DemoPriority, string> = {
   family_harmony: 'c2',
   dance_floor_energy: 'c13',
   easy_arrivals: 'c16',
 }
 
-export const CHALLENGE_GUEST_IDS: Record<DemoPriority, string> = {
+const CHALLENGE_GUEST_IDS: Record<DemoPriority, string> = {
   family_harmony: 'g-sam',
   dance_floor_energy: 'g-priya',
   easy_arrivals: 'g-dot',
 }
 
-export function challengeConstraint(
+function challengeConstraint(
   state: AisleState,
   priority: DemoPriority,
 ): Constraint | undefined {

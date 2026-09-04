@@ -104,7 +104,7 @@ export function dietaryMarkers(legend: DietaryLegendEntry[], dietary: string[]):
 
 // ---- section data ----------------------------------------------------------
 
-export interface TableCardRow {
+interface TableCardRow {
   guestId: string
   name: string
   color: string
@@ -216,7 +216,7 @@ export function buildDirectory(state: AisleState): DirectoryItem[] {
   return items
 }
 
-export interface CateringLine {
+interface CateringLine {
   key: string
   text: string
   dim?: boolean
@@ -293,7 +293,7 @@ export function buildCatering(state: AisleState, legend: DietaryLegendEntry[], s
 
 // ---- stats -----------------------------------------------------------------
 
-export interface ExportGroupStat {
+interface ExportGroupStat {
   name: string
   color: string
   count: number

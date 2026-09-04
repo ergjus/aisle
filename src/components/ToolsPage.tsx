@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { ArrowLeft } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store'
 import { toolCatalog, type CatalogEntry } from '../webmcp/tools'
 import { cn } from '@/lib/utils'
@@ -128,9 +129,11 @@ function ToolCard({ entry }: { entry: CatalogEntry }) {
 }
 
 export function ToolsPage({ onClose }: { onClose: () => void }) {
-  const webmcpAvailable = useStore((s) => s.webmcpAvailable)
-  const agentConnected = useStore((s) => s.agentConnected)
-  const toolNames = useStore((s) => s.toolNames)
+  const { webmcpAvailable, agentConnected, toolNames } = useStore(useShallow((state) => ({
+    webmcpAvailable: state.webmcpAvailable,
+    agentConnected: state.agentConnected,
+    toolNames: state.toolNames,
+  })))
   const pageRef = useRef<HTMLDivElement>(null)
 
   // toolNames changes whenever gating flips, so the catalog stays live.

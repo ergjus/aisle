@@ -17,7 +17,7 @@ const GROUP_PALETTE = [
 ]
 
 /** Stable group → color map, assigned in groupOrder (falls back to first-appearance order). */
-export function groupColors(state: AisleState): Record<string, string> {
+export function groupColors(state: Pick<AisleState, 'groupOrder' | 'guestOrder' | 'guests'>): Record<string, string> {
   const map: Record<string, string> = {}
   let i = 0
   const assign = (g: string) => {
@@ -40,13 +40,6 @@ export function initials(name: string): string {
   const first = parts[0]?.[0] ?? '?'
   const last = parts.length > 1 ? parts[parts.length - 1][0] : ''
   return (first + last).toUpperCase()
-}
-
-export function firstName(name: string): string {
-  const words = name.split(/\s+/)
-  const real = words.filter((w) => !HONORIFICS.has(w.toLowerCase()))
-  if (real.length > 0 && real.length < words.length) return `${words[0]} ${real[0]}`
-  return words[0] ?? name
 }
 
 // ---- guest import parsing --------------------------------------------------

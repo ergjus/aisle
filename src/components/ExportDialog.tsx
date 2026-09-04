@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Printer } from 'lucide-react'
-import { getCore, useStore } from '../store'
+import { useShallow } from 'zustand/react/shallow'
+import { selectCore, useStore } from '../store'
 import { computeViolations } from '../constraints'
 import { formatFeet } from '../geometry'
 import { chartMarkdown, downloadText } from '../utils'
@@ -38,8 +39,9 @@ import {
  * PDF. Markdown and CSV ride along as flat data formats.
  */
 export function ExportDialog({ onClose }: { onClose: () => void }) {
-  const s = useStore()
-  const core = useMemo(() => getCore(), [s])
+  const core = useStore(useShallow(selectCore))
+  const exportRequest = useStore((state) => state.exportRequest)
+  const logActivity = useStore((state) => state.logActivity)
   const [options, setOptionsState] = useState(loadExportOptions)
   const setOptions = (next: ExportOptions) => {
     setOptionsState(next)
@@ -50,7 +52,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   // reload so an already-open dialog reflects what the agent just composed.
   useEffect(() => {
     setOptionsState(loadExportOptions())
-  }, [s.exportRequest])
+  }, [exportRequest])
 
   const avail = useMemo(() => availableSections(core), [core])
   const model = useMemo(() => buildDocModel(core, options), [core, options])
@@ -68,7 +70,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   // portal after this component's effects have already run.
   const [previewW, setPreviewW] = useState(0)
   const previewObserver = useRef<ResizeObserver | null>(null)
-  const previewRef = (el: HTMLDivElement | null) => {
+  const previewRef = useCallback((el: HTMLDivElement | null) => {
     previewObserver.current?.disconnect()
     previewObserver.current = null
     if (!el) return
@@ -76,7 +78,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     ro.observe(el)
     previewObserver.current = ro
     setPreviewW(el.clientWidth)
-  }
+  }, [])
 
   const page = PAGE_PX[options.paper]
   const scale = previewW > 0 ? Math.min(1, previewW / page.w) : 0
@@ -101,24 +103,30 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     // Browsers name the saved PDF after the document title.
     const previous = document.title
     document.title = `${model.displayTitle} — Seating`
+    let restored = false
+    let timeout = 0
     const restore = () => {
+      if (restored) return
+      restored = true
       document.title = previous
+      window.clearTimeout(timeout)
+      window.removeEventListener('afterprint', restore)
     }
     window.addEventListener('afterprint', restore, { once: true })
-    window.setTimeout(restore, 60_000)
-    s.logActivity('export', `Prepared the printable seating document (${includedSummary()}).`, 'you')
+    timeout = window.setTimeout(restore, 60_000)
+    logActivity('export', `Prepared the printable seating document (${includedSummary()}).`, 'you')
     // Two frames: let the hidden print pages commit before the print snapshot.
     requestAnimationFrame(() => requestAnimationFrame(() => window.print()))
   }
 
   const handleMarkdown = () => {
     downloadText(exportFileName(model.displayTitle, 'md'), chartMarkdown(core))
-    s.logActivity('export', 'Downloaded the chart as Markdown.', 'you')
+    logActivity('export', 'Downloaded the chart as Markdown.', 'you')
   }
 
   const handleCsv = () => {
     downloadText(exportFileName(model.displayTitle, 'csv'), chartCSV(core), 'text/csv')
-    s.logActivity('export', 'Downloaded the guest list as CSV.', 'you')
+    logActivity('export', 'Downloaded the guest list as CSV.', 'you')
   }
 
   return (

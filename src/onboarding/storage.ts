@@ -1,7 +1,7 @@
 import type { PersonalizedDemoConfig } from '../types'
 
 export const ONBOARDING_STORAGE_KEY = 'aisle:onboarding:v1'
-export const CHART_STORAGE_KEY = 'aisle:v1'
+const CHART_STORAGE_KEY = 'aisle:v1'
 
 export type ChallengeStep = 0 | 1 | 2
 
@@ -30,7 +30,7 @@ export function readOnboardingRecord(): OnboardingRecord | null {
   }
 }
 
-export function writeOnboardingRecord(record: OnboardingRecord): void {
+function writeOnboardingRecord(record: OnboardingRecord): void {
   try {
     localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify(record))
   } catch {

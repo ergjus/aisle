@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from './store'
 import { Header } from './components/Header'
@@ -19,6 +19,14 @@ function readSidebarOpen(): boolean {
   }
 }
 
+function persistSidebarOpen(open: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_KEY, open ? '0' : '1')
+  } catch {
+    // Preference simply won't stick.
+  }
+}
+
 export default function App() {
   const toast = useStore((s) => s.toast)
   const setToast = useStore((s) => s.setToast)
@@ -33,14 +41,18 @@ export default function App() {
     return initialFirstRun || record?.challenge.status === 'active'
   })
 
-  const setSidebar = (open: boolean) => {
+  const setSidebar = useCallback((open: boolean) => {
     setSidebarOpen(open)
-    try {
-      localStorage.setItem(SIDEBAR_KEY, open ? '0' : '1')
-    } catch {
-      // Preference simply won't stick.
-    }
-  }
+    persistSidebarOpen(open)
+  }, [])
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((open) => {
+      const next = !open
+      persistSidebarOpen(next)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -52,7 +64,7 @@ export default function App() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       e.preventDefault()
       if (key === 'b') {
-        setSidebar(!readSidebarOpen())
+        toggleSidebar()
         return
       }
       const store = useStore.getState()
@@ -61,7 +73,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [toggleSidebar])
 
   useEffect(() => {
     if (!toast) return

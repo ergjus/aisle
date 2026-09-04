@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useStore, type Selection } from '../store'
 import type { RSVP } from '../types'
 import { formatFeet, roomRect, stageUnitsPerFoot } from '../geometry'
@@ -32,7 +33,19 @@ const cardCls =
   'animate-in fade-in zoom-in-95 fixed z-[60] flex w-[264px] flex-col gap-2 rounded-xl border border-input bg-card p-3 shadow-2xl'
 
 function GuestEditor({ sel }: { sel: Selection }) {
-  const s = useStore()
+  const s = useStore(useShallow((state) => ({
+    guests: state.guests,
+    seating: state.seating,
+    groupOrder: state.groupOrder,
+    tables: state.tables,
+    pinned: state.pinned,
+    updateGuest: state.updateGuest,
+    logActivity: state.logActivity,
+    removeGuest: state.removeGuest,
+    pinGuest: state.pinGuest,
+    unseatGuest: state.unseatGuest,
+    setSelection: state.setSelection,
+  })))
   const g = s.guests[sel.id]
   if (!g) return null
   const seat = s.seating[g.id]
@@ -135,7 +148,15 @@ function GuestEditor({ sel }: { sel: Selection }) {
 }
 
 function TableEditor({ sel }: { sel: Selection }) {
-  const s = useStore()
+  const s = useStore(useShallow((state) => ({
+    tables: state.tables,
+    seating: state.seating,
+    venueDimensions: state.venueDimensions,
+    updateTable: state.updateTable,
+    logActivity: state.logActivity,
+    removeTable: state.removeTable,
+    setSelection: state.setSelection,
+  })))
   const t = s.tables[sel.id]
   if (!t) return null
   const occ = Object.values(s.seating).filter((a) => a.tableId === t.id).length

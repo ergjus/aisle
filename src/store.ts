@@ -25,8 +25,23 @@ export function uid(): string {
 /** Omit that distributes over unions, so constraint variants keep their shape. */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 
-export const CHART_STORAGE_KEY = 'aisle:v1'
+const CHART_STORAGE_KEY = 'aisle:v1'
 const MAX_UNDO = 60
+const CORE_KEYS = [
+  'layoutVersion',
+  'guests',
+  'guestOrder',
+  'tables',
+  'tableOrder',
+  'constraints',
+  'seating',
+  'finalized',
+  'groupOrder',
+  'venue',
+  'venueDimensions',
+  'demoMetadata',
+  'pinned',
+] as const satisfies readonly (keyof AisleState)[]
 
 function emptyCore(): AisleState {
   return {
@@ -53,7 +68,8 @@ function prunePins(seating: Record<string, SeatAssignment>, pinned: Record<strin
   return next
 }
 
-function coreOf(s: StoreState): AisleState {
+/** Selects the persisted chart data without transient UI and agent state. */
+export function selectCore(s: StoreState): AisleState {
   return {
     layoutVersion: s.layoutVersion ?? 3,
     guests: s.guests,
@@ -93,7 +109,7 @@ function reconcileGroupOrder(s: AisleState): string[] {
   return order
 }
 
-export interface RuleHighlight {
+interface RuleHighlight {
   guestIds: string[]
   zone: ZoneId | null
 }
@@ -105,7 +121,7 @@ export interface Selection {
   at: { x: number; y: number }
 }
 
-export interface UndoEntry {
+interface UndoEntry {
   state: AisleState
   /** Short name of the action this snapshot precedes, e.g. "seat guest". */
   label: string
@@ -113,7 +129,7 @@ export interface UndoEntry {
 
 /** A seating arrangement the agent has applied *as a question* — it stays on
  *  the chart under a Keep/Revert banner until the human rules on it. */
-export interface Proposal {
+interface Proposal {
   id: string
   /** Banner line, e.g. "a fresh arrangement for the whole room". */
   summary: string
@@ -123,7 +139,7 @@ export interface Proposal {
   at: number
 }
 
-export interface Checkpoint {
+interface Checkpoint {
   name: string
   state: AisleState
   at: number
@@ -297,7 +313,7 @@ function loadPersisted(): AisleState {
 }
 
 /** Lowest free seat index at a table, or -1 when full. */
-export function freeSeatAt(state: AisleState, tableId: string, taken?: Set<number>): number {
+function freeSeatAt(state: AisleState, tableId: string, taken?: Set<number>): number {
   const table = state.tables[tableId]
   if (!table) return -1
   const used = taken ?? new Set(
@@ -346,7 +362,7 @@ export const useStore = create<StoreState>((set, get) => ({
         lastProposalDecision: { id: s.proposal.id, decision: 'keep', at: Date.now() },
       })
     }
-    const stack = [...s.undoStack, { state: structuredClone(coreOf(s)), label }]
+    const stack = [...s.undoStack, { state: structuredClone(selectCore(s)), label }]
     if (stack.length > MAX_UNDO) stack.shift()
     set({ undoStack: stack, redoStack: [] })
   },
@@ -365,7 +381,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set({
       ...prev.state,
       undoStack: s.undoStack.slice(0, -1),
-      redoStack: [...s.redoStack, { state: structuredClone(coreOf(s)), label: prev.label }],
+      redoStack: [...s.redoStack, { state: structuredClone(selectCore(s)), label: prev.label }],
       selection: null,
     })
     get().logActivity('undo', `Undid: ${prev.label}.`, 'you')
@@ -379,7 +395,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set({
       ...next.state,
       redoStack: s.redoStack.slice(0, -1),
-      undoStack: [...s.undoStack, { state: structuredClone(coreOf(s)), label: next.label }],
+      undoStack: [...s.undoStack, { state: structuredClone(selectCore(s)), label: next.label }],
       selection: null,
     })
     get().logActivity('redo', `Redid: ${next.label}.`, 'you')
@@ -515,7 +531,7 @@ export const useStore = create<StoreState>((set, get) => ({
     // An open spot has to fit *this* table's chairs, so the search knows its size.
     const spot = fields.x !== undefined && fields.y !== undefined
       ? { x: fields.x, y: fields.y }
-      : findFreeSpot(coreOf(s), draft)
+      : findFreeSpot(selectCore(s), draft)
     const room = roomRect(s.venueDimensions)
     const placed = { ...draft, x: spot.x, y: spot.y }
     const { dx, dy } = containDelta(tableBounds(placed, s.venueDimensions), room)
@@ -669,7 +685,7 @@ export const useStore = create<StoreState>((set, get) => ({
         .map(([, a]) => a.seat),
     )
     if (target === undefined || target < 0 || target >= table.seats || taken.has(target)) {
-      target = freeSeatAt(coreOf(s), tableId, taken)
+      target = freeSeatAt(selectCore(s), tableId, taken)
     }
     if (target === -1) return { ok: false, error: `${table.name} is full (${table.seats} seats)` }
     s.snapshot('seat guest')
@@ -802,7 +818,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   saveCheckpoint: (name) => {
-    const cp: Checkpoint = { name, state: structuredClone(coreOf(get())), at: Date.now() }
+    const cp: Checkpoint = { name, state: structuredClone(selectCore(get())), at: Date.now() }
     set((s) => ({ checkpoints: { ...s.checkpoints, [name]: cp } }))
     return cp
   },
@@ -861,11 +877,14 @@ export const useStore = create<StoreState>((set, get) => ({
 // ---- persistence -----------------------------------------------------------
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
-useStore.subscribe((s) => {
+useStore.subscribe((s, previous) => {
+  // Cursor animation, selection, activity, and other transient updates do not
+  // belong in localStorage and should not keep postponing a real chart save.
+  if (CORE_KEYS.every((key) => s[key] === previous[key])) return
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     try {
-      localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(coreOf(s)))
+      localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(selectCore(s)))
     } catch {
       // Storage full or unavailable; the session simply won't persist.
     }
@@ -873,5 +892,5 @@ useStore.subscribe((s) => {
 })
 
 export function getCore(): AisleState {
-  return coreOf(useStore.getState())
+  return selectCore(useStore.getState())
 }

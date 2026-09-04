@@ -1,11 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store'
 import type { Guest, Table, VenueDimensions, VenueFeature, VenueFeatureId } from '../types'
 import {
-  CHIP_R,
   WALL_MARGIN,
   chipPositions,
   containDelta,
@@ -26,8 +25,7 @@ import {
   tableDropRadius,
   tableSize,
 } from '../geometry'
-import { agentChipDelay } from '../agentCursor'
-import { AgentCursor } from './AgentCursor'
+import { agentChipDelay, agentChipDepartsAt } from '../agentCursor'
 import { AgentQuestion } from './AgentQuestion'
 import { Celebration } from './Celebration'
 import { ChairGlyph, FeatureArt, TableArt } from './FloorArt'
@@ -36,6 +34,8 @@ import { groupColors, hashId, initials } from '../utils'
 import { SAMPLE } from '../sample'
 import { seatEveryone } from '../actions'
 import { Button } from '@/components/ui/button'
+
+const AgentCursor = lazy(() => import('./AgentCursor').then((module) => ({ default: module.AgentCursor })))
 
 interface DragState {
   kind: 'chip' | 'table' | 'feature' | 'resize-feature' | 'rotate-feature' | 'rotate-table' | 'resize-venue'
@@ -207,6 +207,8 @@ const LOUNGE_MIN_H = 96
 const LOUNGE_MAX_H = 420
 /** Height while collapsed — just the header bar. */
 const LOUNGE_COLLAPSED_H = 34
+/** How long a chip's glide takes — matches --chip-move in canvas.css. */
+const CHIP_MOVE_MS = 680
 
 function readPersistedNumber(key: string, fallback: number): number {
   try {
@@ -279,8 +281,9 @@ export function Canvas() {
   const [loungeHeight, setLoungeHeightState] = useState(() => readPersistedNumber('aisle:lounge:height', LOUNGE_DEFAULT_H))
   const [loungeCollapsed, setLoungeCollapsedState] = useState(() => readPersistedBool('aisle:lounge:collapsed', false))
   const [loungeResizing, setLoungeResizing] = useState(false)
-  /** The chip the human most recently dropped onto a seat, for its settle animation. */
-  const [landed, setLanded] = useState<{ id: string; at: number } | null>(null)
+  /** The chip the human most recently dropped onto a seat — where it was let
+   *  go, so it settles into the seat from there, plus when, for its settle ring. */
+  const [landed, setLanded] = useState<{ id: string; at: number; x: number; y: number } | null>(null)
   /** True while the lounge is folded away only because nobody is waiting in it. */
   const autoCollapsed = useRef(false)
   /** -1 so the very first pass counts as a change and folds an empty lounge away. */
@@ -451,22 +454,76 @@ export function Canvas() {
   // Seated guests live on the zoomable stage; unseated ones live in the fixed
   // lounge footer below it, which zoom never touches.
   const seatedAttending = useMemo(() => attending.filter((id) => s.seating[id]), [attending, s.seating])
-  const unseatedAttending = useMemo(() => attending.filter((id) => !s.seating[id]), [attending, s.seating])
 
   const positions = useMemo(
     () => chipPositions(s),
     [s.guests, s.guestOrder, s.seating, s.tables, s.venueDimensions],
   )
 
-  // Last committed chip world: lets a chip that just left the lounge fly in
-  // from where it stood (the tray anchor, just below the room's bottom edge)
-  // instead of materializing at its seat.
-  const prevChips = useRef<{ positions: Record<string, { x: number; y: number }>; seating: typeof s.seating } | null>(null)
+  // The seating as of the last commit, so a render can tell which chips are
+  // leaving the lounge right now. (Kept current by an effect further down.)
+  const prevSeating = useRef<typeof s.seating | null>(null)
+  /** When a chip last took off from the lounge for the stage. */
+  const lastTakeoffAt = useRef(0)
+
+  // A guest the agent seats straight out of the lounge does not leave until
+  // the cursor's choreography reaches their table — and they wait *in the
+  // lounge*, not at some phantom spot beneath the room. `departures` holds
+  // those guests with the moment they set off; the timer further down releases
+  // them on cue. The bookkeeping lives in refs and is updated during render:
+  // it is idempotent, and doing it as state would cost an extra commit that
+  // unmounts and remounts every waiting chip.
+  const departures = useRef(new Map<string, { at: number; seat: string }>())
+  /** Stage point a chip takes off from, captured from its lounge spot as it leaves. */
+  const takeoffs = useRef(new Map<string, { x: number; y: number }>())
+  /** Centers of the chips resting in the lounge, in canvas pixels, as of the last commit. */
+  const loungeSlots = useRef(new Map<string, { x: number; y: number }>())
+  const [departureTick, bumpDepartures] = useReducer((n: number) => n + 1, 0)
+  {
+    const prev = prevSeating.current
+    const now = Date.now()
+    const seatKey = (id: string) => `${s.seating[id].tableId}:${s.seating[id].seat}`
+    for (const id of seatedAttending) {
+      const seat = seatKey(id)
+      const pending = departures.current.get(id)
+      if (pending) {
+        if (pending.seat === seat) continue
+        // Re-seated while still waiting: follow the new plan, or leave now.
+        const at = agentChipDepartsAt(id)
+        if (at) departures.current.set(id, { at, seat })
+        else departures.current.delete(id)
+      } else if (prev && !prev[id]) {
+        const at = agentChipDepartsAt(id)
+        if (at && at > now) departures.current.set(id, { at, seat })
+      }
+    }
+    for (const id of departures.current.keys()) {
+      if (!s.seating[id] || !s.guests[id] || s.guests[id].rsvp === 'no') departures.current.delete(id)
+    }
+  }
+
+  /** Who the lounge shows: the unseated, plus anyone still waiting to be collected. */
+  const loungeChipIds = useMemo(
+    () => attending.filter((id) => !s.seating[id] || departures.current.has(id)),
+    // departureTick: the map changes shape when the timer releases a chip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attending, s.seating, departureTick],
+  )
+  const stageChipIds = useMemo(
+    () => seatedAttending.filter((id) => !departures.current.has(id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [seatedAttending, departureTick],
+  )
+
   useEffect(() => {
-    prevChips.current = { positions, seating: s.seating }
+    const prev = prevSeating.current
+    // Chips that reached the stage this commit without a choreographed wait
+    // (Seat Everyone, a drop, undo) took off from the lounge just now.
+    if (prev && stageChipIds.some((id) => !prev[id])) lastTakeoffAt.current = Date.now()
+    prevSeating.current = s.seating
   })
 
-  const unseatedCount = unseatedAttending.length
+  const unseatedCount = loungeChipIds.length
 
   // An empty lounge is a strip of wasted floor, so it folds itself away once
   // the last guest is seated and unfolds the moment someone comes back to it.
@@ -478,8 +535,20 @@ export function Canvas() {
     if (before === unseatedCount) return
     if (unseatedCount === 0) {
       if (loungeCollapsed) return
-      autoCollapsed.current = true
-      setLoungeCollapsedState(true)
+      const fold = () => {
+        autoCollapsed.current = true
+        setLoungeCollapsedState(true)
+      }
+      // Folding re-frames the room, which would yank any chip still in the
+      // air: let the last ones land first. (Someone coming back to the lounge
+      // meanwhile changes the count, which cancels the fold.)
+      const wait = lastTakeoffAt.current + CHIP_MOVE_MS - Date.now()
+      if (wait <= 0) {
+        fold()
+        return
+      }
+      const timer = setTimeout(fold, wait)
+      return () => clearTimeout(timer)
     } else if (before === 0 && autoCollapsed.current) {
       autoCollapsed.current = false
       setLoungeCollapsedState(false)
@@ -521,10 +590,64 @@ export function Canvas() {
     return map
   }, [s.tableOrder, s.tables, s.venue, s.venueDimensions])
 
+  /** Canvas pixels (relative to the wrap's top-left) to stage coordinates. */
+  const wrapToStage = (x: number, y: number) => ({ x: (x - ox) / scale, y: (y - oy) / scale })
+
   const toStage = (clientX: number, clientY: number) => {
     const rect = wrapRef.current!.getBoundingClientRect()
-    return { x: (clientX - rect.left - ox) / scale, y: (clientY - rect.top - oy) / scale }
+    return wrapToStage(clientX - rect.left, clientY - rect.top)
   }
+
+  // Remember where each lounge chip rests, so a chip that gets seated without
+  // any choreography (Seat Everyone, undo, an agent with motion reduced) still
+  // takes off from its own spot in the lounge rather than appearing at its seat.
+  useEffect(() => {
+    const wrap = wrapRef.current
+    const lounge = loungeRef.current
+    if (!wrap || !lounge) return
+    const origin = wrap.getBoundingClientRect()
+    const slots = new Map<string, { x: number; y: number }>()
+    for (const chip of lounge.querySelectorAll<HTMLElement>('.chip.flow[data-tour-guest]')) {
+      const r = chip.getBoundingClientRect()
+      slots.set(chip.dataset.tourGuest!, { x: r.left + r.width / 2 - origin.left, y: r.top + r.height / 2 - origin.top })
+    }
+    loungeSlots.current = slots
+  }, [loungeChipIds, loungeH, box.w, box.h])
+
+  // Release waiting chips on cue: as each one's moment arrives, note where it
+  // sits in the lounge — its takeoff point — and re-render it onto the stage.
+  // Runs after every render so the timer always tracks the soonest departure.
+  useEffect(() => {
+    let next = Infinity
+    for (const d of departures.current.values()) next = Math.min(next, d.at)
+    if (!Number.isFinite(next)) return
+    const timer = setTimeout(() => {
+      const now = Date.now()
+      const wrap = wrapRef.current
+      const lounge = loungeRef.current
+      const origin = wrap?.getBoundingClientRect()
+      const loungeTop = lounge && origin ? lounge.getBoundingClientRect().top - origin.top : undefined
+      for (const [id, d] of departures.current) {
+        if (d.at > now) continue
+        const chip = lounge?.querySelector<HTMLElement>(`.chip.flow[data-tour-guest="${CSS.escape(id)}"]`)
+        if (chip && origin && loungeTop !== undefined) {
+          const r = chip.getBoundingClientRect()
+          // Take off from the lounge's top edge, straight above where the chip
+          // sat, so it rises out of the lounge instead of from underneath it.
+          takeoffs.current.set(id, wrapToStage(r.left + r.width / 2 - origin.left, loungeTop))
+        }
+        departures.current.delete(id)
+        lastTakeoffAt.current = now
+      }
+      bumpDepartures()
+    }, Math.max(0, next - Date.now()))
+    return () => clearTimeout(timer)
+  })
+
+  // A takeoff point is read once, when its chip mounts on the stage.
+  useEffect(() => {
+    takeoffs.current.clear()
+  })
 
   // The lounge is a fixed screen rectangle now (not part of the zoomed
   // stage), so it's hit-tested in real screen pixels, not stage units.
@@ -809,7 +932,9 @@ export function Canvas() {
         const res = s.seatGuest(d.id, target)
         if (!res.ok && res.error) s.setToast(res.error)
         else {
-          setLanded({ id: d.id, at: Date.now() })
+          // The human's hand overrules any collection the cursor had planned.
+          departures.current.delete(d.id)
+          setLanded({ id: d.id, at: Date.now(), x: d.x, y: d.y })
           if (from !== target) s.logActivity('drag', `Seated ${name} at ${s.tables[target]?.name}.`, 'you')
         }
       }
@@ -1173,7 +1298,7 @@ export function Canvas() {
           })
         })}
 
-        {seatedAttending.map((id) => {
+        {stageChipIds.map((id) => {
           // The actively-dragged chip renders once, in the drag-ghost layer
           // below — so it can cross over the lounge footer without being
           // painted under it.
@@ -1186,8 +1311,16 @@ export function Canvas() {
           // The agent cursor may be flying over to pick this chip up — hold the
           // chip's departure until the cursor gets there.
           const escortDelay = agentChipDelay(id)
-          const prev = prevChips.current
-          const spawnFrom = prev && !prev.seating[id] ? prev.positions[id] : undefined
+          // Where a chip arriving on the stage sets off from: the lounge spot
+          // it was just released from, the point the human let go of it, or —
+          // for a chip seated with no choreography at all — its resting place
+          // in the lounge, at the lounge's top edge.
+          let spawnFrom = takeoffs.current.get(id)
+          if (!spawnFrom && landed?.id === id && Date.now() - landed.at < 1200) spawnFrom = { x: landed.x, y: landed.y }
+          if (!spawnFrom && prevSeating.current && !prevSeating.current[id]) {
+            const slot = loungeSlots.current.get(id)
+            if (slot) spawnFrom = wrapToStage(slot.x, box.h - loungeH)
+          }
           return (
             <Chip
               key={id}
@@ -1224,7 +1357,11 @@ export function Canvas() {
           )
         })}
 
-        <AgentCursor />
+        {s.agentConnected ? (
+          <Suspense fallback={null}>
+            <AgentCursor />
+          </Suspense>
+        ) : null}
 
         {s.finalized && <div className="ribbon">❦ &nbsp;Finalized — every guest seated, zero drama&nbsp; ❦</div>}
 
@@ -1319,7 +1456,7 @@ export function Canvas() {
         </div>
         {!loungeCollapsed && (
           <div className="lounge-chips">
-            {unseatedAttending
+            {loungeChipIds
               .filter((id) => !(drag?.kind === 'chip' && drag.id === id))
               .map((id) => {
                 const g = s.guests[id]
@@ -1349,7 +1486,7 @@ export function Canvas() {
                   />
                 )
               })}
-            {unseatedAttending.length === 0 && <span className="lounge-empty">Everyone's seated.</span>}
+            {loungeChipIds.length === 0 && <span className="lounge-empty">Everyone's seated.</span>}
           </div>
         )}
       </div>

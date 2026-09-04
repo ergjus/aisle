@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, History, MapPin, Plus, ShieldCheck, Table2, Users, type LucideIcon } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { useStore } from '../store'
+import { selectCore, useStore } from '../store'
 import { groupColors, parseGuestEntries } from '../utils'
 import { SPREADSHEET_ACCEPT, SpreadsheetError, readSpreadsheet } from '../import/spreadsheet'
 import { constraintStatus, constraintText, findDuplicateRule, zoneLabel, zoneNoun, type RuleDraft } from '../constraints'
@@ -600,7 +600,18 @@ function NewGroupRow(props: { onCreated?: (name: string) => void; onClose: () =>
 }
 
 function GuestsSection() {
-  const s = useStore()
+  const s = useStore(useShallow((state) => ({
+    guests: state.guests,
+    guestOrder: state.guestOrder,
+    groupOrder: state.groupOrder,
+    seating: state.seating,
+    tables: state.tables,
+    addGuest: state.addGuest,
+    importGuests: state.importGuests,
+    logActivity: state.logActivity,
+    setSelection: state.setSelection,
+    setToast: state.setToast,
+  })))
   const [addingGuest, setAddingGuest] = useState(false)
   const [query, setQuery] = useState('')
   const [name, setName] = useState('')
@@ -936,8 +947,10 @@ function GuestPicker(props: {
   exclude?: string
   autoFocus?: boolean
 }) {
-  const guestOrder = useStore((state) => state.guestOrder)
-  const guests = useStore((state) => state.guests)
+  const { guestOrder, guests } = useStore(useShallow((state) => ({
+    guestOrder: state.guestOrder,
+    guests: state.guests,
+  })))
   const items = guestOrder
     .filter((id) => id !== props.exclude)
     .map((id) => ({ value: id, label: guests[id].name }))
@@ -968,7 +981,11 @@ function GuestPicker(props: {
 /** The composer builds the rule as the sentence it will become:
  *  "Keep [A] and [B] [together]" / "Seat [A] [near] [the dance floor]". */
 function AddRule() {
-  const s = useStore()
+  const s = useStore(useShallow((state) => ({
+    ...selectCore(state),
+    addConstraint: state.addConstraint,
+    logActivity: state.logActivity,
+  })))
   const [verb, setVerb] = useState<'keep' | 'seat'>('keep')
   const [pairKind, setPairKind] = useState<'together' | 'apart'>('together')
   const [preference, setPreference] = useState<'near' | 'far'>('near')
@@ -1096,7 +1113,12 @@ function AddRule() {
 }
 
 function RulesSection() {
-  const s = useStore()
+  const s = useStore(useShallow((state) => ({
+    ...selectCore(state),
+    logActivity: state.logActivity,
+    removeConstraint: state.removeConstraint,
+    setRuleHighlight: state.setRuleHighlight,
+  })))
   const [addingRule, setAddingRule] = useState(false)
   const counts = { ok: 0, violated: 0, pending: 0 }
   for (const c of s.constraints) counts[constraintStatus(s, c)]++
@@ -1309,30 +1331,24 @@ function SidebarRail(props: {
 
 export function Sidebar({ open: sidebarOpen, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const s = useStore(useShallow((state) => {
-    let brokenCount = 0
-    let pendingRuleCount = 0
-    for (const constraint of state.constraints) {
-      const status = constraintStatus(state, constraint)
-      if (status === 'violated') brokenCount++
-      else if (status === 'pending') pendingRuleCount++
-    }
     return {
+      ...selectCore(state),
       agentLog: state.agentLog,
       clearActivity: state.clearActivity,
-      constraints: state.constraints,
-      guestOrder: state.guestOrder,
-      guests: state.guests,
-      tableOrder: state.tableOrder,
-      tables: state.tables,
-      venue: state.venue,
-      venueDimensions: state.venueDimensions,
-      brokenCount,
-      pendingRuleCount,
       setToast: state.setToast,
     }
   }))
   const [activeSection, setActiveSection] = usePersistedSection('aisle:sidebar:active', 'guests')
-  const { brokenCount, pendingRuleCount } = s
+  const { brokenCount, pendingRuleCount } = useMemo(() => {
+    let broken = 0
+    let pending = 0
+    for (const constraint of s.constraints) {
+      const status = constraintStatus(s, constraint)
+      if (status === 'violated') broken++
+      else if (status === 'pending') pending++
+    }
+    return { brokenCount: broken, pendingRuleCount: pending }
+  }, [s.constraints, s.seating, s.tables, s.tableOrder, s.venue, s.venueDimensions])
   const enabledVenueCount = Object.values(s.venue).filter((feature) => feature.enabled).length
   const attendingCount = s.guestOrder.filter((id) => s.guests[id].rsvp !== 'no').length
   const capacity = s.tableOrder.reduce((sum, id) => sum + s.tables[id].seats, 0)

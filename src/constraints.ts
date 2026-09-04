@@ -44,8 +44,13 @@ export function findDuplicateRule(state: AisleState, candidate: RuleDraft): Cons
 
 export type ConstraintStatus = 'ok' | 'violated' | 'pending'
 
-/** pending = can't be judged yet because someone involved isn't seated. */
-export function constraintStatus(state: AisleState, c: Constraint): ConstraintStatus {
+type ZoneBands = ReturnType<typeof zoneBands>
+
+function statusWithBands(
+  state: AisleState,
+  c: Constraint,
+  getBands: (zone: ZoneId) => ZoneBands,
+): ConstraintStatus {
   if (c.type === 'together' || c.type === 'apart') {
     const sa = state.seating[c.a]
     const sb = state.seating[c.b]
@@ -56,17 +61,30 @@ export function constraintStatus(state: AisleState, c: Constraint): ConstraintSt
   const s = state.seating[c.guestId]
   if (!s) return 'pending'
   if (!state.venue[c.zone]?.enabled) return 'pending'
-  const bands = zoneBands(state, c.zone)
+  const bands = getBands(c.zone)
   const d = bands.byTable[s.tableId]
   if (d === undefined) return 'pending'
   const ok = c.preference === 'near' ? d <= bands.nearMax : d >= bands.farMin
   return ok ? 'ok' : 'violated'
 }
 
+/** pending = can't be judged yet because someone involved isn't seated. */
+export function constraintStatus(state: AisleState, c: Constraint): ConstraintStatus {
+  return statusWithBands(state, c, (zone) => zoneBands(state, zone))
+}
+
 export function computeViolations(state: AisleState): Violation[] {
   const out: Violation[] = []
+  const bands = new Map<ZoneId, ZoneBands>()
+  const getBands = (zone: ZoneId) => {
+    const cached = bands.get(zone)
+    if (cached) return cached
+    const computed = zoneBands(state, zone)
+    bands.set(zone, computed)
+    return computed
+  }
   for (const c of state.constraints) {
-    if (constraintStatus(state, c) !== 'violated') continue
+    if (statusWithBands(state, c, getBands) !== 'violated') continue
     if (c.type === 'together' || c.type === 'apart') {
       out.push({
         kind: c.type,
@@ -92,14 +110,18 @@ export function computeViolations(state: AisleState): Violation[] {
       })
     }
   }
+  const occupancy = new Map<string, number>()
+  for (const assignment of Object.values(state.seating)) {
+    occupancy.set(assignment.tableId, (occupancy.get(assignment.tableId) ?? 0) + 1)
+  }
   for (const tid of state.tableOrder) {
     const t = state.tables[tid]
-    const occupancy = Object.values(state.seating).filter((s) => s.tableId === tid).length
-    if (occupancy > t.seats) {
+    const seated = occupancy.get(tid) ?? 0
+    if (seated > t.seats) {
       out.push({
         kind: 'overfull',
         tableId: tid,
-        text: `${t.name} is over capacity: ${occupancy} guests for ${t.seats} seats`,
+        text: `${t.name} is over capacity: ${seated} guests for ${t.seats} seats`,
       })
     }
   }

@@ -6,7 +6,7 @@ import { DEFAULT_EXPORT_OPTIONS, type ExportOptions } from './model'
  * and both always see the same composition.
  */
 
-export const EXPORT_OPTIONS_KEY = 'aisle:export:options'
+const EXPORT_OPTIONS_KEY = 'aisle:export:options'
 
 export function loadExportOptions(): ExportOptions {
   try {

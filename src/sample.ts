@@ -116,7 +116,7 @@ function t(id: string, name: string, shape: Table['shape'], seats: number, xFt: 
   return { id, name, shape, seats, x: ROOM_ORIGIN.x + ft(xFt), y: ROOM_ORIGIN.y + ft(yFt), rotation: 0 }
 }
 
-export const SAMPLE_TABLES: Table[] = [
+const SAMPLE_TABLES: Table[] = [
   t('t1', 'Table 1', 'round', 8, 7, 12),
   t('t2', 'Table 2', 'round', 8, 17.5, 12),
   t('t3', 'Table 3', 'round', 8, 28, 12),

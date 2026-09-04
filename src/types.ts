@@ -36,7 +36,7 @@ export type VenueFeatureId =
 
 export type VenuePreset = 'ballroom' | 'garden_tent' | 'restaurant' | 'custom'
 
-export type DemoTableStyle = 'round' | 'banquet' | 'mixed'
+type DemoTableStyle = 'round' | 'banquet' | 'mixed'
 
 export type DemoPriority = 'family_harmony' | 'dance_floor_energy' | 'easy_arrivals'
 
@@ -50,7 +50,7 @@ export interface PersonalizedDemoConfig {
   priority: DemoPriority
 }
 
-export interface PersonalizedDemoMetadata {
+interface PersonalizedDemoMetadata {
   kind: 'personalized'
   version: 1
   config: PersonalizedDemoConfig

@@ -27,7 +27,7 @@ export const ROOM = { x: 20, y: 28, w: 1200, h: 660 }
 export const DEFAULT_VENUE_DIMENSIONS: VenueDimensions = { widthFt: 72, lengthFt: 46, snapFt: 1 }
 
 /** Breathing room kept between furniture and the walls. */
-export const WALL_MARGIN_FT = 0.3
+const WALL_MARGIN_FT = 0.3
 export const WALL_MARGIN = ft(WALL_MARGIN_FT)
 
 /** The room's stage rectangle: its true size in feet at the fixed scale. */
@@ -60,12 +60,15 @@ export function stageSize(dimensions: VenueDimensions) {
   return { w: room.x * 2 + room.w, h: room.y + room.h + 28 }
 }
 
-/** Stage-space anchor for the lounge, just below the room's bottom edge — used
- *  only to aim the agent cursor's flight path; the lounge itself renders as a
- *  fixed footer outside the stage, not at these coordinates. */
+/** Stage-space stand-in for the lounge: a strip along the inside of the
+ *  room's bottom wall, nearest the lounge footer. It only aims the agent
+ *  cursor — the lounge itself is a fixed footer outside the stage, so a spot
+ *  below the room would send the cursor (and anything timed to it) off the
+ *  floor plan. Chips never render here. */
 export function trayRect(dimensions: VenueDimensions) {
   const room = roomRect(dimensions)
-  return { x: room.x, y: room.y + room.h + 28, w: Math.min(872, room.w), h: 139 }
+  const h = 40
+  return { x: room.x, y: room.y + room.h - h, w: room.w, h }
 }
 
 // ---- amenities --------------------------------------------------------------
@@ -89,7 +92,7 @@ interface FeaturePlan {
  * banquet table for the gifts — so an amenity, a table, and a wall all read
  * at one scale.
  */
-export const VENUE_PLAN: Record<VenueFeatureId, FeaturePlan> = {
+const VENUE_PLAN: Record<VenueFeatureId, FeaturePlan> = {
   entrance: { label: 'Entrance', enabled: true, xFt: 2, yFt: 3, wFt: 8, hFt: 4, minWFt: 3, minHFt: 2.5 },
   gift_table: { label: 'Gifts & cards', enabled: false, xFt: 12, yFt: 3, wFt: 6, hFt: 2.5, minWFt: 3, minHFt: 2 },
   band: { label: 'Band & speakers', enabled: true, xFt: 58, yFt: 2, wFt: 12, hFt: 6, minWFt: 6, minHFt: 4 },
@@ -115,7 +118,7 @@ export const DEFAULT_VENUE: Record<VenueFeatureId, VenueFeature> = Object.fromEn
 ) as Record<VenueFeatureId, VenueFeature>
 
 /** Prevents labels/controls from collapsing while still allowing compact floor plans. */
-export const FEATURE_MIN_SIZE: Record<VenueFeatureId, { w: number; h: number }> = Object.fromEntries(
+const FEATURE_MIN_SIZE: Record<VenueFeatureId, { w: number; h: number }> = Object.fromEntries(
   Object.entries(VENUE_PLAN).map(([id, plan]) => [id, { w: ft(plan.minWFt), h: ft(plan.minHFt) }]),
 ) as Record<VenueFeatureId, { w: number; h: number }>
 
@@ -154,14 +157,14 @@ export function formatFeet(value: number): string {
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}′`
 }
 
-export function zoneCenter(zone: VenueFeature) {
+function zoneCenter(zone: VenueFeature) {
   return { x: zone.x + zone.w / 2, y: zone.y + zone.h / 2 }
 }
 
 // ---- tables and chairs ------------------------------------------------------
 
 /** A chair chip is an 18-inch seat. */
-export const CHIP_R = ft(0.75)
+const CHIP_R = ft(0.75)
 
 /** Gap between the tabletop edge and the chair pulled up to it. */
 const SEAT_GAP = ft(0.3)
@@ -263,7 +266,7 @@ export function featureBounds(feature: VenueFeature): Bounds {
 
 // ---- footprints and overlap -------------------------------------------------
 
-export interface Point { x: number; y: number }
+interface Point { x: number; y: number }
 
 /**
  * The floor a piece of furniture actually covers. A round table's chairs
@@ -411,7 +414,7 @@ export function containDelta(bounds: Bounds, room: RoomRect, margin = WALL_MARGI
 }
 
 /** How far past the walls `bounds` reaches, in feet (0 when fully inside). */
-export function overhangFeet(bounds: Bounds, room: RoomRect): number {
+function overhangFeet(bounds: Bounds, room: RoomRect): number {
   const over = Math.max(
     room.x - bounds.left,
     room.y - bounds.top,
@@ -497,12 +500,14 @@ export function tableDropRadius(table: Table, dimensions: VenueDimensions = DEFA
   return w / 2 + SEAT_REACH
 }
 
-export function trayPos(index: number, dimensions: VenueDimensions = DEFAULT_VENUE_DIMENSIONS): { x: number; y: number } {
+/** Where the cursor goes to collect (or deliver) the index-th lounge guest:
+ *  spread along the bottom-wall strip, folding back to the start once it is
+ *  full — every spot stays on the floor plan. */
+function trayPos(index: number, dimensions: VenueDimensions = DEFAULT_VENUE_DIMENSIONS): { x: number; y: number } {
   const tray = trayRect(dimensions)
   const perRow = Math.max(1, Math.floor((tray.w - 50) / 34))
   const col = index % perRow
-  const row = Math.floor(index / perRow)
-  return { x: tray.x + 36 + col * 34, y: tray.y + 38 + row * 32 }
+  return { x: tray.x + 36 + col * 34, y: tray.y + tray.h / 2 }
 }
 
 export function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {

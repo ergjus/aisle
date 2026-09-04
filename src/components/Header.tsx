@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Printer } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { useStore } from '../store'
+import { selectCore, useStore } from '../store'
 import { computeViolations, dramaScore } from '../constraints'
 import { formatFeet } from '../geometry'
 import { SAMPLE } from '../sample'
@@ -23,13 +23,9 @@ const ShortcutsDialog = lazy(() => import('./ShortcutsDialog').then((module) => 
  */
 export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
   const s = useStore(useShallow((state) => {
-    const violations = computeViolations(state)
     return {
-      constraints: state.constraints,
-      demoMetadata: state.demoMetadata,
+      ...selectCore(state),
       exportOpen: state.exportOpen,
-      guestOrder: state.guestOrder,
-      guests: state.guests,
       loadSample: state.loadSample,
       logActivity: state.logActivity,
       redo: state.redo,
@@ -37,12 +33,8 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
       requestExport: state.requestExport,
       resetAll: state.resetAll,
       setExportOpen: state.setExportOpen,
-      tableOrder: state.tableOrder,
       undo: state.undo,
       undoStack: state.undoStack,
-      venueDimensions: state.venueDimensions,
-      violationCount: violations.length,
-      dramaScore: dramaScore(violations),
     }
   }))
   const [showTools, setShowTools] = useState(false)
@@ -50,6 +42,11 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
   const empty = s.guestOrder.length === 0 && s.tableOrder.length === 0
   const attending = s.guestOrder.filter((id) => s.guests[id].rsvp !== 'no')
   const canArrange = attending.length > 0 && s.tableOrder.length > 0
+  const violations = useMemo(
+    () => computeViolations(s),
+    [s.constraints, s.guestOrder, s.guests, s.seating, s.tableOrder, s.tables, s.venue],
+  )
+  const violationCount = violations.length
 
   // "?" opens the shortcut sheet from anywhere that isn't a text field.
   useEffect(() => {
@@ -120,7 +117,7 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
           <span className="figures mt-0.5 truncate text-[12px] text-ink-soft">{dateline}</span>
         </div>
         <div className="masthead-rule hidden lg:block" aria-hidden="true" />
-        <DramaMeter score={s.dramaScore} broken={s.violationCount} />
+        <DramaMeter score={dramaScore(violations)} broken={violationCount} />
       </div>
 
       <div className="min-w-2 flex-1" />
@@ -175,9 +172,11 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
  * when the browser has no agent surface at all. Click to open the toolbox.
  */
 function AgentPlacecard({ onClick }: { onClick: () => void }) {
-  const agentConnected = useStore((s) => s.agentConnected)
-  const webmcpAvailable = useStore((s) => s.webmcpAvailable)
-  const toolCount = useStore((s) => s.toolNames.length)
+  const { agentConnected, webmcpAvailable, toolCount } = useStore(useShallow((state) => ({
+    agentConnected: state.agentConnected,
+    webmcpAvailable: state.webmcpAvailable,
+    toolCount: state.toolNames.length,
+  })))
 
   const card = agentConnected
     ? { tone: 'live', name: 'The agent', meta: `at the table · ${toolCount} tools` }

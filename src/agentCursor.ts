@@ -34,8 +34,8 @@ export interface CursorPerformance {
 }
 
 // Matches --chip-move in canvas.css so a carried chip and the cursor arrive together.
-export const CHIP_EASE: [number, number, number, number] = [0.23, 0.9, 0.28, 1]
-export const CARRY_MS = 680
+const CHIP_EASE: [number, number, number, number] = [0.23, 0.9, 0.28, 1]
+const CARRY_MS = 680
 const APPROACH_MS = 420
 const GRAB_HOLD_MS = 150
 const DROP_HOLD_MS = 300
@@ -80,13 +80,13 @@ let playingUntil = 0
  * the current act). Chip delays are set relative to now, so choreography adds
  * this lead to keep chips from leaving before the cursor can get to them.
  */
-export function estimatedBacklogMs(): number {
+function estimatedBacklogMs(): number {
   const queued = queue.reduce((ms, p) => ms + perfDuration(p), 0)
   return queued + (playing ? Math.max(0, playingUntil - Date.now()) : 0)
 }
 
 /** Resolves when the performance has played — or immediately if it can't. */
-export function enqueuePerformance(p: CursorPerformance): Promise<void> {
+function enqueuePerformance(p: CursorPerformance): Promise<void> {
   if (reducedMotion() || p.steps.length === 0) return Promise.resolve()
   if (typeof document !== 'undefined' && document.hidden) return Promise.resolve()
   return new Promise((resolve) => {
@@ -114,10 +114,6 @@ export function queuedCount(): number {
 
 export function setCursorPlaying(v: boolean): void {
   playing = v
-}
-
-export function cursorBusy(): boolean {
-  return playing || queue.length > 0
 }
 
 /** The cursor component registers here to be woken when work arrives. */
@@ -165,8 +161,10 @@ export function endAgentSession(): void {
 
 // When the cursor is on its way to pick a chip up, the chip's CSS transition
 // is delayed so it doesn't leave before the cursor arrives.
-const chipDelays = new Map<string, { delay: number; until: number }>()
+const chipDelays = new Map<string, { at: number; delay: number; until: number }>()
 
+/** Milliseconds this chip should still hold before setting off — the time
+ *  left until the cursor reaches it. Undefined once nothing is pending. */
 export function agentChipDelay(id: string): number | undefined {
   const entry = chipDelays.get(id)
   if (!entry) return undefined
@@ -174,11 +172,21 @@ export function agentChipDelay(id: string): number | undefined {
     chipDelays.delete(id)
     return undefined
   }
-  return entry.delay
+  return Math.max(0, entry.at + entry.delay - Date.now())
+}
+
+/** The moment (Date.now() clock) the cursor collects this chip, while that
+ *  is still ahead. The canvas keeps a lounge chip in the lounge until then. */
+export function agentChipDepartsAt(id: string): number | undefined {
+  const entry = chipDelays.get(id)
+  if (!entry) return undefined
+  const at = entry.at + entry.delay
+  return at > Date.now() ? at : undefined
 }
 
 function setChipDelay(id: string, delay: number): void {
-  chipDelays.set(id, { delay, until: Date.now() + delay + 2200 })
+  const now = Date.now()
+  chipDelays.set(id, { at: now, delay, until: now + delay + 2200 })
 }
 
 // ---- choreography -----------------------------------------------------------
@@ -289,7 +297,7 @@ export function choreograph(opts: {
     const toLounge = moved.filter((id) => !after.seating[id])
     if (toLounge.length) {
       const tray = trayRect(after.venueDimensions)
-      groups.push({ x: tray.x + tray.w / 2, y: tray.y - 26, label: 'Back to the lounge', ids: toLounge })
+      groups.push({ x: tray.x + tray.w / 2, y: tray.y + tray.h / 2, label: 'Back to the lounge', ids: toLounge })
     }
     const perStop = Math.min(1500, Math.max(700, STAGED_TOTAL_MS / groups.length))
     const fly = Math.round(perStop * 0.45)

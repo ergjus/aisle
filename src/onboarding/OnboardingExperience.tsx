@@ -1,8 +1,9 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, SparklesIcon } from 'lucide-react'
 import { seatEveryone } from '../actions'
-import { useStore } from '../store'
+import { selectCore, useStore } from '../store'
 import type { DemoPriority, PersonalizedDemoConfig, VenueFeatureId, VenuePreset } from '../types'
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -737,7 +738,7 @@ function CoachCard({
   initialStep: ChallengeStep
   onChanged: (record: OnboardingRecord | null) => void
 }) {
-  const state = useStore()
+  const state = useStore(useShallow(selectCore))
   const reducedMotion = usePrefersReducedMotion()
   const [step, setStep] = useState<ChallengeStep>(initialStep)
   const [celebrating, setCelebrating] = useState(false)

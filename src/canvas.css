@@ -954,6 +954,16 @@
   cursor: grab;
   transition: transform var(--chip-move), box-shadow 200ms ease, opacity 300ms ease;
   will-change: transform;
+  /* Above the tables (z 5) and their chairs: a chip, and the name tag that
+     pops up over it, must never disappear behind a tabletop. */
+  z-index: 10;
+}
+
+/* The chip someone is looking at floats over its neighbours too, so its name
+   tag isn't hidden by the next chair along. */
+.chip:hover,
+.chip.selected {
+  z-index: 32;
 }
 
 .chip.dragging {
