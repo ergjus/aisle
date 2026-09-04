@@ -3,7 +3,7 @@
 **A wedding seating chart that you and your AI agent plan together — live, on the same canvas.**
 
 - 🔗 **Live app:** [aisle-three.vercel.app](https://aisle-three.vercel.app/)
-- 🎬 **Demo video:** [Watch on YouTube](https://youtu.be/iI_ZaFHdqmE)
+- 🎬 **Demo video:** [Watch on YouTube](https://youtu.be/81zaJ8tASLo)
 - 🧩 Built on [WebMCP](https://github.com/webmachinelearning/webmcp) for **The WebMCP Challenge** (OpenAI)
 - 📄 [MIT licensed](LICENSE) · no backend, no login — state lives in your browser
 
