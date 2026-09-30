@@ -4,7 +4,8 @@
 
 - 🔗 **Live app:** [aisle-three.vercel.app](https://aisle-three.vercel.app/)
 - 🎬 **Demo video:** [Watch on YouTube](https://youtu.be/81zaJ8tASLo)
-- 🧩 Built on [WebMCP](https://github.com/webmachinelearning/webmcp) for **The WebMCP Challenge** (OpenAI)
+- 🏆 **Winner of [The WebMCP Challenge](https://openai.com/webmcp-challenge/) by OpenAI** — one of 10 winning projects out of ~2,500 entries
+- 🧩 Built on [WebMCP](https://github.com/webmachinelearning/webmcp)
 - 📄 [MIT licensed](LICENSE) · no backend, no login — state lives in your browser
 
 ---
