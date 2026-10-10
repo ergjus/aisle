@@ -51,7 +51,7 @@ describe('the home screen', () => {
     expect(screen.getByText(String(SAMPLE.tables.length))).toBeInTheDocument()
     expect(screen.getByText(String(SAMPLE.constraints.length))).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /Rules/ }))
+    await user.click(screen.getAllByRole('button', { name: /Rules/ }).find((b) => b.classList.contains('home-tile'))!)
     expect(onOpenChart).toHaveBeenLastCalledWith('rules')
     await user.click(screen.getByRole('button', { name: 'Open the floor plan' }))
     expect(onOpenChart).toHaveBeenLastCalledWith()

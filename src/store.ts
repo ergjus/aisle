@@ -19,6 +19,7 @@ import { ROOM, WALL_MARGIN, containDelta, featureBounds, findFreeSpot, freshVenu
 import { planPersonalizedSample, type PersonalizedPlannerResult } from './onboarding/planner'
 import { launchedFromShareLink } from './share/hash'
 import { EMPTY_EVENT, loadEvent, loadScreen, saveEvent, saveScreen, type EventDetails, type Screen } from './event'
+import { hasEntered, markEntered } from './landing/gate'
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9)
@@ -281,6 +282,8 @@ export interface StoreState extends AisleState {
   setFoundGuest: (id: string | null) => void
 
   updateEvent: (patch: Partial<EventDetails>) => void
+  /** Through the front door: the visitor is a user now, and lands on the home screen. */
+  enterApp: () => void
   openHome: () => void
   openChart: () => void
 }
@@ -434,8 +437,9 @@ export const useStore = create<StoreState>((set, get) => ({
   sharedView: startsShared ? { status: 'loading' } : null,
   foundGuest: null,
   event: startsShared ? EMPTY_EVENT : loadEvent(),
-  // A share link opens straight onto the chart it carries.
-  screen: startsShared ? 'chart' : loadScreen(),
+  // A share link opens straight onto the chart it carries; a first-time
+  // visitor gets the front door; everyone else lands where they left off.
+  screen: startsShared ? 'chart' : hasEntered() ? loadScreen() : 'landing',
 
   snapshot: (label = 'change') => {
     const s = get()
@@ -1014,6 +1018,10 @@ export const useStore = create<StoreState>((set, get) => ({
     const event = { ...get().event, ...patch }
     set({ event })
     if (get().viewMode === 'edit') saveEvent(event)
+  },
+  enterApp: () => {
+    markEntered()
+    get().openHome()
   },
   openHome: () => {
     saveScreen('home')

@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { useStore } from './store'
 import { Header } from './components/Header'
 import { Home, type PlanSection } from './components/Home'
+import { Landing } from './components/Landing'
 import { Sidebar } from './components/Sidebar'
 import { Canvas } from './components/Canvas'
 import { Editors } from './components/Editors'
@@ -36,7 +37,9 @@ export default function App() {
   const setToast = useStore((s) => s.setToast)
   const shared = useStore((s) => s.viewMode === 'shared')
   const sharedView = useStore((s) => s.sharedView)
-  const home = useStore((s) => s.screen === 'home') && !shared
+  const screen = useStore((s) => s.screen)
+  const landing = screen === 'landing' && !shared
+  const home = screen === 'home' && !shared
   const [sampleRoomRequest, setSampleRoomRequest] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
   const agentReady = useHostedAgent((s) => s.status === 'ready')
@@ -81,7 +84,7 @@ export default function App() {
       // A shared chart is view-only: no history to walk, no sidebar to fold.
       // The home screen has neither, either.
       const state = useStore.getState()
-      if (state.viewMode === 'shared' || state.screen === 'home') return
+      if (state.viewMode === 'shared' || state.screen !== 'chart') return
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       e.preventDefault()
@@ -106,6 +109,10 @@ export default function App() {
     const t = setTimeout(() => setToast(null), 3500)
     return () => clearTimeout(t)
   }, [toast, setToast])
+
+  // The front door stands on its own: no masthead, no chart, nothing loaded
+  // that a visitor hasn't asked for yet.
+  if (landing) return <Landing />
 
   return (
     <div className={cn('grid h-screen', shared ? 'grid-rows-[auto_auto_minmax(0,1fr)]' : 'grid-rows-[auto_minmax(0,1fr)]')}>

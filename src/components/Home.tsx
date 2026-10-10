@@ -1,10 +1,11 @@
-import { useMemo } from 'react'
-import { ArrowRight, FileSpreadsheet, LayoutTemplate, Sparkles } from 'lucide-react'
+import { useMemo, type ReactNode } from 'react'
+import { ArrowRight, Check, FileSpreadsheet, LayoutTemplate, Sparkles, Wand2 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { selectCore, useStore } from '../store'
 import { computeViolations } from '../constraints'
 import { formatFeet } from '../geometry'
 import { SAMPLE } from '../sample'
+import { seatEveryone } from '../actions'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
@@ -20,6 +21,23 @@ function ago(time: number, now = Date.now()): string {
   if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
   const days = Math.round(hours / 24)
   return days === 1 ? 'yesterday' : `${days} days ago`
+}
+
+/** "In 212 days", "Tomorrow", "Today", or nothing when the date doesn't parse. */
+export function countdown(date: string, now = new Date()): string | null {
+  const text = date.trim()
+  if (!text) return null
+  const parsed = new Date(text)
+  if (Number.isNaN(parsed.getTime())) return null
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const target = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
+  const days = Math.round((target.getTime() - start.getTime()) / 86_400_000)
+  if (days < 0) return days === -1 ? 'Yesterday' : `${-days} days ago`
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Tomorrow'
+  if (days < 14) return `In ${days} days`
+  const weeks = Math.round(days / 7)
+  return weeks < 9 ? `In ${weeks} weeks` : `In ${days} days`
 }
 
 function EventField({
@@ -61,18 +79,21 @@ function Tile({
   detail,
   tone,
   onOpen,
+  children,
 }: {
   label: string
   figure: string
   detail: string
   tone?: 'broken' | 'complete'
   onOpen: () => void
+  children?: ReactNode
 }) {
   return (
     <button type="button" className={cn('home-tile', tone && `home-tile-${tone}`)} onClick={onOpen}>
       <span className="smallcaps home-tile-label">{label}</span>
       <span className="home-tile-figure figures">{figure}</span>
       <span className="home-tile-detail">{detail}</span>
+      {children}
     </button>
   )
 }
@@ -136,6 +157,25 @@ export function Home({ onOpenChart }: { onOpenChart: (section?: PlanSection) => 
   const complete = attending > 0 && seated === attending && broken === 0
   const share = attending > 0 ? seated / attending : 0
   const recent = s.agentLog.slice(0, 4)
+  const yes = s.guestOrder.filter((id) => s.guests[id].rsvp === 'yes').length
+  const canArrange = attending > 0 && tableCount > 0
+  const groups = s.groupOrder
+    .map((name) => ({ name, count: s.guestOrder.filter((id) => s.guests[id].group === name).length }))
+    .filter((g) => g.count > 0)
+    .sort((a, b) => b.count - a.count)
+  const roomSet = Object.values(s.venue).some((f) => f.enabled && f.id !== 'entrance' && f.id !== 'bathroom') || tableCount > 0
+  const when = countdown(s.event.date)
+
+  // The road from an empty chart to a printed one, with where this wedding is on it.
+  const journey: { label: string; done: boolean; detail: string; section?: PlanSection }[] = [
+    { label: 'Guest list', done: guestCount > 0, detail: guestCount > 0 ? `${guestCount} on the list` : 'Paste or import names', section: 'guests' },
+    { label: 'Room', done: roomSet, detail: roomSet ? `${formatFeet(s.venueDimensions.widthFt)} × ${formatFeet(s.venueDimensions.lengthFt)}` : 'Size it, add the dance floor', section: 'venue' },
+    { label: 'Tables', done: tableCount > 0 && seats >= attending, detail: tableCount > 0 ? `${seats} seats for ${attending}` : 'Place the tables', section: 'tables' },
+    { label: 'Rules', done: s.constraints.length > 0 && broken === 0, detail: s.constraints.length === 0 ? 'Who sits with whom' : broken > 0 ? `${broken} broken` : `${s.constraints.length} kept`, section: 'rules' },
+    { label: 'Seated', done: attending > 0 && seated === attending, detail: attending === 0 ? 'No one attending yet' : `${seated} of ${attending}` },
+    { label: 'Final', done: s.finalized, detail: s.finalized ? 'Marked final' : 'Print when it is done' },
+  ]
+  const stage = journey.findIndex((step) => !step.done)
 
   const seeExample = () => {
     s.loadSample(SAMPLE)
@@ -178,6 +218,7 @@ export function Home({ onOpenChart }: { onOpenChart: (section?: PlanSection) => 
               fit
               onChange={(date) => s.updateEvent({ date })}
             />
+            {when && <span className="home-event-when">{when}</span>}
             <span className="home-event-sep" aria-hidden="true">·</span>
             <EventField
               label="Venue"
@@ -225,11 +266,44 @@ export function Home({ onOpenChart }: { onOpenChart: (section?: PlanSection) => 
               <div className="home-progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={attending} aria-valuenow={seated} aria-label="Guests seated">
                 <span style={{ width: `${Math.round(share * 100)}%` }} />
               </div>
-              <Button className="home-progress-open h-9 px-4 text-[13px] font-semibold" onClick={() => onOpenChart()}>
-                Open the floor plan
-                <ArrowRight data-icon="inline-end" className="size-4" aria-hidden="true" />
-              </Button>
+              <div className="home-progress-actions">
+                {broken > 0 ? (
+                  <Button variant="outline" className="h-9 px-4 text-[13px]" onClick={() => { seatEveryone('repair'); onOpenChart() }} title="Runs the solver in repair mode, moving as few guests as possible">
+                    <Wand2 data-icon="inline-start" className="size-4" aria-hidden="true" />
+                    Fix the rules
+                  </Button>
+                ) : canArrange && seated < attending ? (
+                  <Button variant="outline" className="h-9 px-4 text-[13px]" onClick={() => { seatEveryone('full'); onOpenChart() }} title="Arranges the whole room automatically, honoring every rule">
+                    <Wand2 data-icon="inline-start" className="size-4" aria-hidden="true" />
+                    Seat everyone
+                  </Button>
+                ) : null}
+                <Button className="h-9 px-4 text-[13px] font-semibold" onClick={() => onOpenChart()}>
+                  Open the floor plan
+                  <ArrowRight data-icon="inline-end" className="size-4" aria-hidden="true" />
+                </Button>
+              </div>
             </section>
+
+            <ol className="home-journey" aria-label="Where things stand">
+              {journey.map((step, i) => (
+                <li key={step.label} className={cn('home-journey-step', step.done && 'home-journey-done', i === stage && 'home-journey-now')}>
+                  {step.section ? (
+                    <button type="button" onClick={() => onOpenChart(step.section)}>
+                      <span className="home-journey-mark" aria-hidden="true">{step.done ? <Check /> : i + 1}</span>
+                      <span className="home-journey-label">{step.label}</span>
+                      <span className="home-journey-detail">{step.detail}</span>
+                    </button>
+                  ) : (
+                    <div>
+                      <span className="home-journey-mark" aria-hidden="true">{step.done ? <Check /> : i + 1}</span>
+                      <span className="home-journey-label">{step.label}</span>
+                      <span className="home-journey-detail">{step.detail}</span>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ol>
 
             <section className="home-tiles" aria-label="On the chart">
               <Tile
@@ -245,21 +319,51 @@ export function Home({ onOpenChart }: { onOpenChart: (section?: PlanSection) => 
                         : 'All replied'
                 }
                 onOpen={() => onOpenChart('guests')}
-              />
+              >
+                {guestCount > 0 && (
+                  <>
+                    <span className="home-rsvp" role="img" aria-label={`${yes} coming, ${pending} pending, ${declined} not coming`}>
+                      <span className="home-rsvp-yes" style={{ width: `${(yes / guestCount) * 100}%` }} />
+                      <span className="home-rsvp-pending" style={{ width: `${(pending / guestCount) * 100}%` }} />
+                    </span>
+                    <span className="home-tile-foot">
+                      {groups.length} group{groups.length === 1 ? '' : 's'}
+                      {groups.length > 0 && ` · ${groups.slice(0, 3).map((g) => `${g.name} ${g.count}`).join(', ')}${groups.length > 3 ? '…' : ''}`}
+                    </span>
+                  </>
+                )}
+              </Tile>
               <Tile
                 label="Tables"
                 figure={String(tableCount)}
                 detail={tableCount === 0 ? 'None yet' : `${seats} seat${seats === 1 ? '' : 's'} for ${attending} guest${attending === 1 ? '' : 's'}`}
                 tone={tableCount > 0 && seats < attending ? 'broken' : undefined}
                 onOpen={() => onOpenChart('tables')}
-              />
+              >
+                {tableCount > 0 && (
+                  <span className="home-tile-foot">
+                    {seats - seated > 0 ? `${seats - seated} seats free` : 'Every seat taken'}
+                    {Object.keys(s.pinned).length > 0 && ` · ${Object.keys(s.pinned).length} pinned`}
+                  </span>
+                )}
+              </Tile>
               <Tile
                 label="Rules"
                 figure={String(s.constraints.length)}
                 detail={broken > 0 ? `${broken} broken` : s.constraints.length === 0 ? 'None yet' : 'All kept'}
                 tone={broken > 0 ? 'broken' : s.constraints.length > 0 ? 'complete' : undefined}
                 onOpen={() => onOpenChart('rules')}
-              />
+              >
+                {s.constraints.length > 0 && (
+                  <span className="home-tile-foot">
+                    {[
+                      [s.constraints.filter((c) => c.type === 'apart').length, 'apart'],
+                      [s.constraints.filter((c) => c.type === 'together').length, 'together'],
+                      [s.constraints.filter((c) => c.type === 'zone').length, 'near or far'],
+                    ].filter(([n]) => Number(n) > 0).map(([n, kind]) => `${n} ${kind}`).join(' · ')}
+                  </span>
+                )}
+              </Tile>
             </section>
           </>
         )}

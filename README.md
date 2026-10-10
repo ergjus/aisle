@@ -134,9 +134,13 @@ Aisle is set like wedding stationery laid over an architect's sheet, not like a 
 
 Motion is spent where it means something: the agent cursor carries chips and speaks in a real speech bubble; a chair pulls out when your chip hovers over it; a dropped chip settles with a soft ring; and petals fall exactly once, when the chart is finalized. Reduced-motion users get none of it and lose nothing.
 
+## The front door
+
+A visitor with no wedding in this browser lands on the landing page: the sample wedding's floor plan, seated, as the hero; how it works in three steps; what you get; the price (free to 40 guests, one payment for the whole wedding); and the questions couples ask. **Start your seating chart** walks in with an empty chart, **See the sample wedding** walks in with the sample loaded. Anyone who has stepped in once (or has a chart saved) goes straight to their home screen; once accounts land, a signed-in session will too.
+
 ## The home screen
 
-Every visit starts on the home screen: the wedding's name, date and venue, written straight onto the page; how the seating stands (*41 of 70 seated · 2 rules broken*) with the next thing it needs; and a tile each for guests, tables and rules that opens the floor plan on that section. An empty chart offers three ways to begin — add a guest list, set up the room, or load the sample wedding. The wordmark in the masthead is the way back from the floor plan, and the name on the home screen heads the printed document and the share link.
+Every visit starts on the home screen: the wedding's name, date and venue, written straight onto the page, with a countdown once the date parses; how the seating stands (*41 of 70 seated · 2 rules broken*) with the next thing it needs and a Seat everyone or Fix button when one applies; the road from guest list to final chart with where this wedding is on it; and a tile each for guests (RSVP bar, groups), tables (free seats, pins) and rules (apart, together, near or far) that opens the floor plan on that section. An empty chart offers three ways to begin — add a guest list, set up the room, or load the sample wedding. The wordmark in the masthead is the way back from the floor plan, and the name on the home screen heads the printed document and the share link.
 
 ## A sample room
 

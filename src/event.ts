@@ -39,12 +39,13 @@ export function saveEvent(event: EventDetails): void {
   }
 }
 
-/** Which screen the app opens on, remembered for the tab so a reload lands where you were. */
-export type Screen = 'home' | 'chart'
+/** Which screen is up: the front door for visitors, the home screen, or the floor plan.
+ *  Home and chart are remembered for the tab so a reload lands where you were. */
+export type Screen = 'landing' | 'home' | 'chart'
 
 const SCREEN_STORAGE_KEY = 'aisle:screen'
 
-export function loadScreen(): Screen {
+export function loadScreen(): Exclude<Screen, 'landing'> {
   try {
     return sessionStorage.getItem(SCREEN_STORAGE_KEY) === 'chart' ? 'chart' : 'home'
   } catch {
@@ -52,7 +53,7 @@ export function loadScreen(): Screen {
   }
 }
 
-export function saveScreen(screen: Screen): void {
+export function saveScreen(screen: Exclude<Screen, 'landing'>): void {
   try {
     sessionStorage.setItem(SCREEN_STORAGE_KEY, screen)
   } catch {
