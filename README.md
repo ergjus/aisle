@@ -15,7 +15,7 @@ Seating a wedding is a two-brain problem.
 - **Your agent** is good at the machine half: satisfying 17 constraints at once, importing 80 guests from a spreadsheet, re-tiering the whole room when a table disappears, and remembering every rule you've stated so far.
 - **You** are good at the human half: family politics, vibes, taste. You veto, you drag people back, you know *why* Aunt Marta cannot be within a champagne-glass throw of Uncle Dario.
 
-Aisle puts both hands on the same chart. You talk to your agent — *"seat everyone, keep the exes apart, Grandma away from the speakers"* — and the room **visibly rearranges itself**: a little agent cursor walks across the canvas, picks each guest chip up and carries it to its new seat, narrating its plan in a speech bubble. Then you drag someone somewhere spicier by hand, the violation lines light up, the drama meter climbs toward *Full telenovela*, and you say *"fix what I just broke"* — and the agent repairs it, moving as few guests as possible.
+Aisle puts both hands on the same chart. You talk to your agent — *"seat everyone, keep the exes apart, Grandma away from the speakers"* — and the room **visibly rearranges itself**: a little agent cursor walks across the canvas, picks each guest chip up and carries it to its new seat, narrating its plan in a speech bubble. Then you drag someone somewhere spicier by hand, the violation lines light up, the masthead says how many rules are broken, and you say *"fix what I just broke"* — and the agent repairs it, moving as few guests as possible.
 
 Neither of you could do this alone. That's the point.
 
@@ -35,11 +35,11 @@ No API keys, no server, no bespoke integration. Open the page in an agent-enable
 
 ## Try it in 90 seconds
 
-1. Open the [live app](https://aisle-three.vercel.app/) in an agent-enabled browser (see [Testing with an agent](#testing-with-an-agent)).
-2. First visit? A short **welcome guide** asks about your venue and builds a personalized room. Or skip it and click **Load Sample Wedding** — 72 guests, 10 tables, and 17 rules including a divorce, an ex-couple, a neighborly fence war, and a grandmother who hates loud speakers.
+1. Open the [live app](https://aisle-three.vercel.app/). The built-in agent sits in the left panel; an agent-enabled browser can also drive the page directly (see [Testing with an agent](#testing-with-an-agent)).
+2. First visit? A short questionnaire asks about your venue and builds a room in its shape, seated with the sample wedding — 72 guests, 10 tables, and 17 rules including a divorce, an ex-couple, a neighborly fence war, and a grandmother who hates loud speakers. Skip it and the room starts empty; **Load the sample wedding** is in the ⋯ menu.
 3. Ask your agent: *"Seat everyone. Keep the exes apart and put Grandma far from the band."*
 4. Watch the room arrange itself, with a plain-language explanation of every trade-off.
-5. Drag Sam Whitfield onto Jordan's table. Watch the violation line appear and the drama meter rise.
+5. Drag Sam Whitfield onto Jordan's table. Watch the violation line appear and the masthead turn to *1 rule broken · Fix*.
 6. Ask: *"Fix any problems I just caused."* → *"Repaired the chart, moving only 1 guest."*
 7. Ask: *"propose a bolder arrangement."* The room plays it out live under a gold **Keep / Revert** banner — and the agent's tool call **waits for your verdict**, then reports which way you ruled.
 8. Drag Grandma Rosa to the table you want and press **P** to pin her. Ask: *"reseat the whole room."* Everyone else moves; she doesn't — and if the agent tries `seat_guest` on her, the tool tells it that seat is yours.
@@ -53,7 +53,7 @@ No login, no backend. State lives in your browser's localStorage.
 
 Aisle registers its tools through `document.modelContext.registerTool(tool, { signal })` — the current spec — and unregisters by aborting each tool's `AbortSignal`, with fallbacks for the deprecated `navigator.modelContext` alias, `unregisterTool()` on Chrome 146–150, and `provideContext({ tools })` on older drafts. Every tool has a `title`, a natural-language description, and a JSON Schema; read-only tools carry `readOnlyHint` (so agent surfaces can auto-approve them) and `untrustedContentHint` (their replies echo guest names and notes that people typed). Guests and tables are addressed by **fuzzy name** — agents say `"Grandma"` or `"Table 4"`, and ambiguity comes back as a helpful error listing candidates.
 
-**43 tools in total.** Click the **agent's place card** in the masthead to browse every one of them, live, with its current registration state — and a list of things to try saying.
+**43 tools in total.** The catalog below is the whole of it; in a dev build, `aisle.tools()` in the console lists the ones registered right now.
 
 ### Always registered (27)
 
@@ -122,27 +122,21 @@ Everything the agent can do, you can do by hand on the same state — and everyt
 - **Undo/redo** every change, yours or the agent's (⌘Z / ⇧⌘Z — the veto button).
 - **Rule on proposals** — when the agent uses `propose_arrangement`, the room rearranges live under a gold **Keep / Revert** banner and the agent literally waits for your click. Reverting glides everyone back; pressing ⌘Z counts as a revert; simply continuing to work adopts the proposal.
 - **Answer its questions** — `ask_human` puts a card on the chart with the agent's options as buttons (and a box for your own words). Pick one and its tool call continues; skip it and the agent is told the decision is its own.
-- Violated rules draw animated dashed lines between the offending guests, badge the table, and feed the **drama meter** (*Serene → Simmering → Full telenovela*); a legend on the chart decodes the group colors.
+- Violated rules draw animated dashed lines between the offending guests, badge the table, and turn the masthead's status line brick (*3 rules broken · Fix*); a legend on the chart decodes the group colors.
 - **Share a view-only link** — *Share link…* in the masthead builds a link to the chart (with a Copy button, its length, and a private-notes toggle) for family, a client, the venue, or the caterer.
 - Actions stream into a shared activity feed — the agent's entries in gold, yours labeled *You* — and everything the agent touches glows for a moment with a name tag, so bulk rearrangements stay legible.
 
-The chart is a real seating planner without any agent at all — with a visible hint inviting you to bring one.
+The chart is a real seating planner without any agent at all.
 
 ## The look
 
-Aisle is set like wedding stationery laid over an architect's sheet, not like a dashboard. The chrome is ivory paper with a grain to it; the working text is **Karla**, the headings **Cormorant Garamond** and **EB Garamond**, and every number — feet, seat counts, tool names — is lettered in **IBM Plex Mono**, the way dimensions are on a drawing. The masthead reads like the top of a printed program: wordmark, a dateline of what's on the chart, a brass drama gauge, and a **place card set for the agent** that lights gold while it works. The floor plan has dimension strings along its walls and a title block in the corner (*Drawn by: You & the agent · Rev. 14*). Amenities are drawn top-down in gold ink — parquet on the dance floor, a bar with its stools, a cake in tiers — and every chair faces its table.
+Aisle is set like wedding stationery laid over an architect's sheet, not like a dashboard. The chrome is ivory paper with a grain to it; the working text is **Karla**, the headings **Cormorant Garamond** and **EB Garamond**, and every number — feet, seat counts, tool names — is lettered in **IBM Plex Mono**, the way dimensions are on a drawing. The masthead reads like the top of a printed program: wordmark, a dateline of what's on the chart, and one line on how the seating stands. The floor plan has dimension strings along its walls and a title block in the corner (*Room 60′ × 40′ · Rev. 14*). Amenities are drawn top-down in gold ink — parquet on the dance floor, a bar with its stools, a cake in tiers — and every chair faces its table.
 
 Motion is spent where it means something: the agent cursor carries chips and speaks in a real speech bubble; a chair pulls out when your chip hovers over it; a dropped chip settles with a soft ring; and petals fall exactly once, when the chart is finalized. Reduced-motion users get none of it and lose nothing.
 
-## The welcome guide
+## The first visit
 
-First-time visitors get a short questionnaire instead of an empty room: pick a venue shape (**Ballroom**, **Garden / Tent**, **Restaurant / Private room**, or **Custom**), confirm the room's real dimensions in feet, choose how many tables and of what shape, and say what you care about most — family harmony, dance-floor energy, or easy arrivals. Aisle lays out a personalized venue with the amenities that fit, seats it with the sample wedding, and hands you a **three-step challenge** built around your answer:
-
-1. **Seat the room** with Seat Everyone, honoring all 17 rules.
-2. **Create a little tension** — drag the one guest whose rule your priority is about.
-3. **Repair with restraint** — watch *Fix With Minimal Moves* disturb as few seats as possible.
-
-The guide watches real state, not clicks, so you can wander off and do it your own way; it notices when you're done. Edit the chart out from under it (delete the guest it was about, remove the rule) and it pauses politely rather than breaking. **Welcome guide** in the header replays it any time.
+First-time visitors get a short questionnaire instead of an empty room: pick a venue shape (**Ballroom**, **Garden / Tent**, **Restaurant / Private room**, or **Custom**), confirm the room's real dimensions in feet, choose how many tables and of what shape, and tick the amenities the venue has. Aisle lays out the room to scale and seats it with the sample wedding, so the first thing you see is a working chart to talk to the agent about. **Set up a sample room…** in the ⋯ menu replays it any time.
 
 ## The deliverable: a printed seating document
 
@@ -165,7 +159,7 @@ The same composer is a tool: an agent calls `export_chart` with a title, date, v
 
 **ChatGPT browser / Atlas:** open the live URL and ask the agent to plan the wedding; Aisle's tools appear as page tools.
 
-**No agent? No problem.** The exact same tool layer is exposed in the DevTools console:
+**Development builds** expose the exact same tool layer in the DevTools console (`npm run dev`):
 
 ```js
 aisle.tools()                                   // list currently registered tools
@@ -207,7 +201,7 @@ npm test        # 196 tests across 21 files (Vitest + Testing Library)
 
 Vite + React 19 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. Deploys as a static site plus one optional serverless function for the built-in agent (this repo auto-deploys to Vercel on push).
 
-The tests cover the parts that would be miserable to verify by hand: the tool layer and its dynamic registration, proposal and question lifecycles under concurrency, pinned seats through the solver and the agent's tools, the geometry and zone bands, spreadsheet parsing, export pagination, share-link encoding and its defenses against damaged links, the read-only shared view, the onboarding challenge state machine, and the sidebar's interaction details.
+The tests cover the parts that would be miserable to verify by hand: the tool layer and its dynamic registration, proposal and question lifecycles under concurrency, pinned seats through the solver and the agent's tools, the geometry and zone bands, spreadsheet parsing, export pagination, share-link encoding and its defenses against damaged links, the read-only shared view, the first-visit questionnaire, and the sidebar's interaction details.
 
 ## Where things live
 
@@ -224,10 +218,10 @@ api/agent.ts             serverless step function for the built-in agent (holds 
   geometry.ts            real-feet room math, table/amenity footprints, zone bands
   actions.ts             shared human/agent actions, so both paths are one path
   agentCursor.ts         turns each mutation's diff into cursor choreography
-  components/            Canvas, FloorArt, Sidebar, Header (masthead), AgentQuestion,
-                         Celebration, Editors, ExportDialog, ShareDialog, SharedViewBar,
-                         ToolsPage, ShortcutsDialog
-  onboarding/            welcome questionnaire, personalized venue planner, challenge
+  components/            Canvas, FloorArt, Sidebar, Header (masthead), ChartStatus,
+                         AgentChat, AgentQuestion, Celebration, Editors, ExportDialog,
+                         ShareDialog, SharedViewBar, ShortcutsDialog
+  onboarding/            first-visit questionnaire and the personalized venue planner
   import/                .xlsx/.csv/.tsv reader (hand-rolled ZIP + XML, zero deps)
   export/                print document model, pagination, and the SVG floor plan
   share/                 share-link codec (compact payload, deflate, base64url) and the read-only viewer
@@ -239,7 +233,7 @@ api/agent.ts             serverless step function for the built-in agent (holds 
 - **Zone rules** (`src/geometry.ts`) — "near the dance floor" means the guest's table is in the closest ~third of the distance range across all tables, so the rules stay meaningful as tables are dragged around.
 - **The living chart** (`src/components/Canvas.tsx`) — every guest is one absolutely-positioned chip in a single coordinate space (tables *and* the unseated lounge), so any state change animates as a pure CSS transform glide, with a stable per-chip stagger for bulk moves. Agent-touched chips get one-shot CSS pulse animations on keyed overlay elements — no timers, nothing to get stuck.
 - **The agent cursor** (`src/agentCursor.ts`) — each tool call's before/after diff is turned into a small performance: approach, grab, carry, drop. The chip itself is held back with a transition delay so the cursor visibly *carries* the guest, and `share_plan` / `wrap_up` give that cursor a voice, so a fifty-move rearrangement reads as work being done rather than a screen flicker.
-- **Dynamic registration** (`src/webmcp/tools.ts`) — a store subscription recomputes the toolset signature (`hasTables`, `hasContent`, `canFinalize`) on every state change and diffs registrations, so tools appear and vanish as the room evolves. The in-app toolbox page renders the same catalog, showing exactly which tools are live and what unlocks the rest.
+- **Dynamic registration** (`src/webmcp/tools.ts`) — a store subscription recomputes the toolset signature (`hasTables`, `hasContent`, `canFinalize`) on every state change and diffs registrations, so tools appear and vanish as the room evolves.
 - **Tool calls that wait for people** (`propose_arrangement`, `ask_human`) — every mutating tool already holds its reply until the cursor choreography finishes; proposals and questions extend the same mechanism to a *human decision*: the reply stays open until Keep/Revert or an answer (or times out politely into a pending note). The lifecycles are honest under concurrency — any new snapshot adopts a proposal, undo rejects it, a second question is refused while one is waiting — and that logic is unit-tested.
 - **Spreadsheet import with zero dependencies** (`src/import/`) — an `.xlsx` is a ZIP of XML, and browsers already ship the inflate half in `DecompressionStream`, so Aisle walks the archive's central directory itself and reads only the parts it needs. Header rows are matched by meaning, so name/group/RSVP/dietary columns can arrive in any order: split First/Last name with Title and Suffix, partner / plus-one / "Guest 2" / child columns (each becomes a guest in the same party), group, household or bride's/groom's side, per-event RSVP columns (the reception or wedding wins over the rehearsal dinner), meal choice and dietary restrictions, and notes; address, email, phone and gift columns are skipped. The header fingerprints of Zola, The Knot and WeddingWire only name the source in the summary — the mapping never depends on them. Rows with no header are read by what each column holds.
 - **The export document** (`src/export/`) — the printed chart is modeled as plain data first: deterministic pagination from measured constants (unit-tested, no browser needed), then rendered twice from the same model — scaled down as the dialog's live preview and full-size for the browser's print pipeline, so what you preview is exactly what prints. The floor plan is one generated SVG: real-feet scale, dimension strings, hatched dance floor, seats colored by guest group.

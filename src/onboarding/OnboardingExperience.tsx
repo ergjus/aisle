@@ -1,11 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, SparklesIcon } from 'lucide-react'
-import { seatEveryone } from '../actions'
-import { selectCore, useStore } from '../store'
-import type { DemoPriority, PersonalizedDemoConfig, VenueFeatureId, VenuePreset } from '../types'
-import { cn } from '@/lib/utils'
+import { ArrowLeftIcon, ArrowRightIcon, CheckIcon } from 'lucide-react'
+import { useStore } from '../store'
+import type { PersonalizedDemoConfig, VenueFeatureId, VenuePreset } from '../types'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,21 +38,12 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   VENUE_FEATURE_IDS,
   VENUE_PRESET_DEFAULTS,
-  amenitiesForPriority,
   expandVenuePreset,
   validateDimensions,
 } from './planner'
 import {
-  createAssistedChallengeViolation,
-  challengePauseReason,
-  isChallengeStepComplete,
-} from './challenge'
-import {
-  readOnboardingRecord,
   recordOnboardingCompletion,
   recordOnboardingSkip,
-  updatePersistedChallenge,
-  type ChallengeStep,
   type OnboardingRecord,
 } from './storage'
 
@@ -76,15 +64,7 @@ const QUESTION_ITEMS = [
     required: true,
     choices: [{ value: 'round' }, { value: 'banquet' }, { value: 'mixed' }],
   },
-  {
-    name: 'focus',
-    required: true,
-    choices: [
-      { value: 'family_harmony' },
-      { value: 'dance_floor_energy' },
-      { value: 'easy_arrivals' },
-    ],
-  },
+  { name: 'amenities', required: true },
 ] as const
 
 type QuestionName = (typeof QUESTION_ITEMS)[number]['name']
@@ -131,12 +111,6 @@ const FEATURE_LABELS: Record<VenueFeatureId, string> = {
   gift_table: 'Gift table',
 }
 
-const PRIORITY_COPY: Record<DemoPriority, { label: string; description: string }> = {
-  family_harmony: { label: 'Family harmony', description: 'Learn to spot and repair a delicate people conflict.' },
-  dance_floor_energy: { label: 'Dance-floor energy', description: 'Keep a dance lover inside the near-floor band.' },
-  easy_arrivals: { label: 'Easy arrivals', description: 'Keep an arrival-watcher close to the entrance.' },
-}
-
 function initialConfig(): PersonalizedDemoConfig {
   const preset = expandVenuePreset('ballroom')
   return {
@@ -146,7 +120,6 @@ function initialConfig(): PersonalizedDemoConfig {
     tableStyle: 'round',
     seatsPerTable: 8,
     amenities: preset.amenities,
-    priority: 'family_harmony',
   }
 }
 
@@ -269,7 +242,7 @@ function FirstRunDialog({
   const dimensionsTitleId = useId()
   const venueTitleId = useId()
   const tablesTitleId = useId()
-  const focusTitleId = useId()
+  const amenitiesTitleId = useId()
 
   const dimensionErrors = validateDimensions(config.widthFt, config.lengthFt)
 
@@ -331,15 +304,11 @@ function FirstRunDialog({
       window.requestAnimationFrame(() => widthRef.current?.focus())
       return
     }
-    const normalizedConfig = {
-      ...config,
-      amenities: amenitiesForPriority(config.amenities, config.priority),
-    }
     const store = useStore.getState()
-    const result = store.loadPersonalizedSample(normalizedConfig)
+    const result = store.loadPersonalizedSample(config)
     if (!result.ok) {
       setPlannerError(result)
-      setItem(result.question === 'dimensions' ? 'dimensions' : 'focus')
+      setItem(result.question === 'dimensions' ? 'dimensions' : 'amenities')
       store.setToast(result.message)
       window.requestAnimationFrame(() => {
         const selector = result.question === 'dimensions' ? '#welcome-width' : '[data-amenity-choice] [role="checkbox"]'
@@ -377,7 +346,7 @@ function FirstRunDialog({
       >
         <DialogHeader className="sr-only">
           <DialogTitle>Welcome to Aisle</DialogTitle>
-          <DialogDescription>Configure a local personalized sample wedding in four quick questions.</DialogDescription>
+          <DialogDescription>Set up a sample wedding in your kind of room in four quick questions.</DialogDescription>
         </DialogHeader>
 
         <AnimatePresence mode="wait">
@@ -394,8 +363,8 @@ function FirstRunDialog({
               <p className="welcome-kicker">A room begins with a little light</p>
               <h2>Let&rsquo;s set the table for your kind of celebration.</h2>
               <p className="welcome-deck">
-                Four quick choices shape a private, local demo using Aisle&rsquo;s 72 named guests and real seating rules.
-                Nothing is sent anywhere.
+                Four quick choices build a room in your venue&rsquo;s shape, seated with a sample wedding of 72 guests and
+                real seating rules, so you can see how it works before adding your own list.
               </p>
               <VenueSketch reducedMotion={reducedMotion} />
               <div className="welcome-intro-actions">
@@ -547,7 +516,7 @@ function FirstRunDialog({
                           How should the tables read across the room?
                         </QuestionnaireTitle>
                         <QuestionnaireDescription render={<CardDescription />}>
-                          Aisle will make enough tables for everyone plus breathing room for the challenge.
+                          Aisle will make enough tables for everyone, with a little breathing room.
                         </QuestionnaireDescription>
                         <QuestionnaireHeader eyebrow="Table plan" />
                       </CardHeader>
@@ -594,63 +563,42 @@ function FirstRunDialog({
                   </AnimatedPanel>
                 </QuestionnaireItem>
 
-                <QuestionnaireItem aria-labelledby={focusTitleId} name="focus" required>
-                  <AnimatedPanel active={item === 'focus'} reducedMotion={reducedMotion}>
+                <QuestionnaireItem aria-labelledby={amenitiesTitleId} name="amenities" required>
+                  <AnimatedPanel active={item === 'amenities'} reducedMotion={reducedMotion}>
                     <Card className="welcome-card">
                       <CardHeader>
-                        <QuestionnaireTitle id={focusTitleId} render={<CardTitle />}>
-                          Add the details that make the room yours.
+                        <QuestionnaireTitle id={amenitiesTitleId} render={<CardTitle />}>
+                          What is in the room?
                         </QuestionnaireTitle>
                         <QuestionnaireDescription render={<CardDescription />}>
-                          Choose amenities, then choose the lesson you want the demo to teach.
+                          Pick the amenities your venue has. Rules like &ldquo;near the dance floor&rdquo; are measured from where they sit.
                         </QuestionnaireDescription>
-                        <QuestionnaireHeader eyebrow="Details & focus" />
+                        <QuestionnaireHeader eyebrow="Amenities" />
                       </CardHeader>
                       <CardContent className="flex flex-col gap-6">
+                        <QuestionnaireInput
+                          aria-label="Chosen amenities"
+                          className="sr-only"
+                          tabIndex={-1}
+                          value={config.amenities.join(', ') || 'none'}
+                          readOnly
+                        />
                         <FieldSet>
                           <FieldLegend variant="label">Venue amenities</FieldLegend>
-                          <FieldDescription>
-                            Dance-floor energy always includes a dance floor; Easy arrivals always includes an entrance.
-                          </FieldDescription>
                           <FieldGroup data-slot="checkbox-group" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                            {VENUE_FEATURE_IDS.map((id) => {
-                              const forced = (config.priority === 'dance_floor_energy' && id === 'dance_floor') ||
-                                (config.priority === 'easy_arrivals' && id === 'entrance')
-                              const checked = forced || config.amenities.includes(id)
-                              return (
-                                <Field key={id} orientation="horizontal" data-amenity-choice>
-                                  <Checkbox
-                                    id={`amenity-${id}`}
-                                    checked={checked}
-                                    disabled={forced}
-                                    onCheckedChange={(next) => toggleAmenity(id, next)}
-                                  />
-                                  <FieldLabel htmlFor={`amenity-${id}`} className="font-normal">
-                                    {FEATURE_LABELS[id]}
-                                  </FieldLabel>
-                                </Field>
-                              )
-                            })}
-                          </FieldGroup>
-                        </FieldSet>
-                        <FieldSet>
-                          <FieldLegend variant="label">Demo focus</FieldLegend>
-                          <QuestionnaireChoices className="sm:grid-cols-3">
-                            {(Object.keys(PRIORITY_COPY) as DemoPriority[]).map((priority) => (
-                              <QuestionnaireChoice
-                                key={priority}
-                                value={priority}
-                                checked={config.priority === priority}
-                                onChange={() => {
-                                  setConfig((current) => ({ ...current, priority }))
-                                  setPlannerError(null)
-                                }}
-                              >
-                                <span className="font-medium">{PRIORITY_COPY[priority].label}</span>
-                                <QuestionnaireChoiceDescription>{PRIORITY_COPY[priority].description}</QuestionnaireChoiceDescription>
-                              </QuestionnaireChoice>
+                            {VENUE_FEATURE_IDS.map((id) => (
+                              <Field key={id} orientation="horizontal" data-amenity-choice>
+                                <Checkbox
+                                  id={`amenity-${id}`}
+                                  checked={config.amenities.includes(id)}
+                                  onCheckedChange={(next) => toggleAmenity(id, next)}
+                                />
+                                <FieldLabel htmlFor={`amenity-${id}`} className="font-normal">
+                                  {FEATURE_LABELS[id]}
+                                </FieldLabel>
+                              </Field>
                             ))}
-                          </QuestionnaireChoices>
+                          </FieldGroup>
                         </FieldSet>
                         {plannerError?.question === 'amenities' ? (
                           <Alert variant="destructive">
@@ -678,11 +626,11 @@ function FirstRunDialog({
               <p className="welcome-kicker">The room is ready</p>
               <h2>{PRESET_COPY[config.venuePreset].label}, set in candlelight.</h2>
               <p className="welcome-deck">
-                {config.widthFt} × {config.lengthFt} ft · {config.tableStyle === 'mixed' ? 'Mixed tables' : `${config.tableStyle} tables`} · {PRIORITY_COPY[config.priority].label}
+                {config.widthFt} × {config.lengthFt} ft · {config.tableStyle === 'mixed' ? 'Mixed tables' : `${config.tableStyle} tables`} · 72 sample guests seated
               </p>
               <VenueSketch reducedMotion={reducedMotion} />
               <Button size="lg" onClick={() => completedRecord && onRevealed(completedRecord)}>
-                Begin the challenge
+                Open the room
                 <ArrowRightIcon data-icon="inline-end" />
               </Button>
             </motion.main>
@@ -693,200 +641,23 @@ function FirstRunDialog({
   )
 }
 
-const CHALLENGE_STEPS: Record<DemoPriority, readonly { title: string; body: string; target: string }[]> = {
-  family_harmony: [
-    { title: 'Seat the room', body: 'Use Seat Everyone. The solver will honor all 17 sample rules.', target: '[data-tour="seat-everyone"]' },
-    { title: 'Create a little tension', body: 'Drag Sam Whitfield onto Jordan Banks’s table so their apart rule breaks.', target: '[data-tour-guest="g-sam"]' },
-    { title: 'Repair with restraint', body: 'Use Fix With Minimal Moves and watch the solver disturb as few seats as possible.', target: '[data-tour="violation-banner"]' },
-  ],
-  dance_floor_energy: [
-    { title: 'Seat the room', body: 'Use Seat Everyone. The solver will honor all 17 sample rules.', target: '[data-tour="seat-everyone"]' },
-    { title: 'Test the dance-floor band', body: 'Move Priya Sharma to a table outside the near-dance-floor band.', target: '[data-tour-guest="g-priya"]' },
-    { title: 'Repair with restraint', body: 'Use Fix With Minimal Moves and watch Priya return with the smallest repair.', target: '[data-tour="violation-banner"]' },
-  ],
-  easy_arrivals: [
-    { title: 'Seat the room', body: 'Use Seat Everyone. The solver will honor all 17 sample rules.', target: '[data-tour="seat-everyone"]' },
-    { title: 'Test an arrival rule', body: 'Move Dot Pemberton away from the entrance.', target: '[data-tour-guest="g-dot"]' },
-    { title: 'Repair with restraint', body: 'Use Fix With Minimal Moves and bring Dot back near the entrance.', target: '[data-tour="violation-banner"]' },
-  ],
-}
-
-function useTargetHighlight(selector: string | null) {
-  const [targetLow, setTargetLow] = useState(false)
-  useEffect(() => {
-    if (!selector) return
-    const target = document.querySelector<HTMLElement>(selector)
-    if (!target) return
-    target.classList.add('welcome-tour-highlight')
-    const measure = () => setTargetLow(target.getBoundingClientRect().top > window.innerHeight * 0.55)
-    measure()
-    window.addEventListener('resize', measure)
-    return () => {
-      target.classList.remove('welcome-tour-highlight')
-      window.removeEventListener('resize', measure)
-    }
-  }, [selector])
-  return targetLow
-}
-
-function CoachCard({
-  priority,
-  initialStep,
-  onChanged,
-}: {
-  priority: DemoPriority
-  initialStep: ChallengeStep
-  onChanged: (record: OnboardingRecord | null) => void
-}) {
-  const state = useStore(useShallow(selectCore))
-  const reducedMotion = usePrefersReducedMotion()
-  const [step, setStep] = useState<ChallengeStep>(initialStep)
-  const [celebrating, setCelebrating] = useState(false)
-  const pauseReason = challengePauseReason(state, priority)
-  const definition = CHALLENGE_STEPS[priority][step]
-  const targetLow = useTargetHighlight(pauseReason ? null : definition.target)
-
-  useEffect(() => {
-    if (pauseReason || !isChallengeStepComplete(state, priority, step)) return
-    if (step < 2) {
-      const next = (step + 1) as ChallengeStep
-      setStep(next)
-      onChanged(updatePersistedChallenge({ step: next }))
-      return
-    }
-    setCelebrating(true)
-    updatePersistedChallenge({ status: 'completed', step: 2 })
-  }, [onChanged, pauseReason, priority, state, step])
-
-  const skip = () => onChanged(updatePersistedChallenge({ status: 'skipped', step }))
-
-  const assist = () => {
-    if (step === 0) seatEveryone('full')
-    else if (step === 1) {
-      const result = createAssistedChallengeViolation(priority)
-      useStore.getState().setToast(result.message)
-    } else seatEveryone('repair')
-  }
-
-  if (celebrating) {
-    return (
-      <motion.aside
-        className="welcome-coach welcome-coach-complete"
-        initial={reducedMotion ? false : { opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        role="status"
-        aria-live="polite"
-      >
-        <Sparkles reducedMotion={reducedMotion} />
-        <SparklesIcon aria-hidden="true" />
-        <h2>Beautifully repaired.</h2>
-        <p>You seated the room, found a real rule violation, and fixed it with minimal disruption.</p>
-        <Button onClick={() => onChanged(readOnboardingRecord())}>Finish</Button>
-      </motion.aside>
-    )
-  }
-
-  return (
-    <motion.aside
-      className={cn('welcome-coach', targetLow && 'welcome-coach-top')}
-      initial={reducedMotion ? false : { opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: reducedMotion ? 0 : 0.25 }}
-      aria-label="Personalized demo challenge"
-    >
-      <p className="welcome-coach-kicker">Challenge · {step + 1} of 3</p>
-      {pauseReason ? (
-        <>
-          <h2>Challenge paused</h2>
-          <p>{pauseReason}</p>
-        </>
-      ) : (
-        <>
-          <h2>{definition.title}</h2>
-          <p>{definition.body}</p>
-        </>
-      )}
-      <div className="welcome-coach-actions">
-        <Button variant="ghost" onClick={skip}>Skip</Button>
-        {!pauseReason ? <Button onClick={assist}>Do it for me</Button> : null}
-      </div>
-    </motion.aside>
-  )
-}
-
-const GUIDE_STEPS = [
-  { target: '[data-tour="webmcp-badge"]', title: 'Your agent sees this room', body: 'The WebMCP badge shows when the existing chart tools are ready. The guide never changes those schemas.' },
-  { target: '[data-tour="seat-everyone"]', title: 'One action seats the room', body: 'Seat Everyone uses the same deterministic solver available to the chart tools.' },
-  { target: '[data-tour="lounge"]', title: 'Unseated guests wait in the lounge', body: 'Drag chips between the lounge and real table seats without leaving the canvas.' },
-  { target: '[data-tour="rules"]', title: 'House rules stay visible', body: 'Together, apart, and venue-distance rules explain every warning and repair.' },
-] as const
-
-function WelcomeGuide({ onClose }: { onClose: () => void }) {
-  const reducedMotion = usePrefersReducedMotion()
-  const [step, setStep] = useState(0)
-  const current = GUIDE_STEPS[step]
-  const targetLow = useTargetHighlight(current.target)
-  return (
-    <motion.aside
-      className={cn('welcome-coach', targetLow && 'welcome-coach-top')}
-      initial={reducedMotion ? false : { opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: reducedMotion ? 0 : 0.25 }}
-      aria-label="Welcome guide"
-    >
-      <p className="welcome-coach-kicker">Welcome guide · {step + 1} of {GUIDE_STEPS.length}</p>
-      <h2>{current.title}</h2>
-      <p>{current.body}</p>
-      <div className="welcome-coach-actions">
-        <Button variant="ghost" onClick={onClose}>Skip</Button>
-        {step > 0 ? <Button variant="outline" onClick={() => setStep((value) => value - 1)}>Back</Button> : null}
-        <Button onClick={() => step === GUIDE_STEPS.length - 1 ? onClose() : setStep((value) => value + 1)}>
-          {step === GUIDE_STEPS.length - 1 ? 'Finish' : 'Next'}
-        </Button>
-      </div>
-    </motion.aside>
-  )
-}
-
 export default function OnboardingExperience({
   initialFirstRun,
-  guideRequest,
+  sampleRoomRequest,
 }: {
   initialFirstRun: boolean
-  guideRequest: number
+  /** Bumped by the header's "Set up a sample room…" to reopen the questionnaire. */
+  sampleRoomRequest: number
 }) {
   const [showFirstRun, setShowFirstRun] = useState(initialFirstRun)
-  const [record, setRecord] = useState<OnboardingRecord | null>(() => readOnboardingRecord())
-  const [guideOpen, setGuideOpen] = useState(false)
-  const seenGuideRequest = useRef(0)
+  const seenRequest = useRef(0)
 
   useEffect(() => {
-    if (guideRequest === 0 || guideRequest === seenGuideRequest.current) return
-    seenGuideRequest.current = guideRequest
-    setGuideOpen(true)
-  }, [guideRequest])
+    if (sampleRoomRequest === 0 || sampleRoomRequest === seenRequest.current) return
+    seenRequest.current = sampleRoomRequest
+    setShowFirstRun(true)
+  }, [sampleRoomRequest])
 
-  const priority = record?.lastConfiguration?.priority
-  const activeChallenge = record?.status === 'completed' && record.challenge.status === 'active' && priority
-
-  return (
-    <>
-      {showFirstRun ? (
-        <FirstRunDialog
-          onSkipped={(next) => {
-            setRecord(next)
-            setShowFirstRun(false)
-          }}
-          onRevealed={(next) => {
-            setRecord(next)
-            setShowFirstRun(false)
-          }}
-        />
-      ) : null}
-      {!showFirstRun && !guideOpen && activeChallenge ? (
-        <CoachCard priority={priority} initialStep={record.challenge.step} onChanged={setRecord} />
-      ) : null}
-      {guideOpen ? <WelcomeGuide onClose={() => setGuideOpen(false)} /> : null}
-    </>
-  )
+  if (!showFirstRun) return null
+  return <FirstRunDialog onSkipped={() => setShowFirstRun(false)} onRevealed={() => setShowFirstRun(false)} />
 }

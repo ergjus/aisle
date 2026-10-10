@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { resetConversation, sendToAgent, stopAgent, useHostedAgent, type ChatEntry } from '../agent/hosted'
+import { useStore } from '../store'
 
 const STARTERS = [
-  'Seat everyone and keep the feuds apart.',
-  'Fix whatever I just broke, moving as few people as possible.',
-  'Why is Grandma at her table?',
+  'Seat everyone, keeping families together.',
+  'Keep my parents at separate tables.',
+  'Put the college friends near the dance floor.',
+  'Fix the broken rules, moving as few people as possible.',
 ]
 
 /**
@@ -70,6 +72,9 @@ export function AgentChat({ docked = false }: { docked?: boolean }) {
     )
   }
 
+  // Undo is offered on the most recent change only: that is the one ⌘Z walks.
+  const lastUndoable = entries.reduce((found, entry, i) => (entry.kind === 'tool' && entry.undoable ? i : found), -1)
+
   const send = (text: string) => {
     if (!text.trim() || busy) return
     setDraft('')
@@ -100,7 +105,7 @@ export function AgentChat({ docked = false }: { docked?: boolean }) {
       <div className="agent-chat-log" ref={logRef} aria-live="polite">
         {entries.length === 0 ? (
           <div className="agent-chat-empty">
-            <p>Tell the agent what you want and watch it work the chart. Everything it does lands in your undo history.</p>
+            <p>Say what you want in plain words and watch the room change. Anything it does, you can undo.</p>
             <div className="agent-chat-starters">
               {STARTERS.map((s) => (
                 <button key={s} type="button" onClick={() => send(s)}>
@@ -110,7 +115,7 @@ export function AgentChat({ docked = false }: { docked?: boolean }) {
             </div>
           </div>
         ) : (
-          entries.map((entry) => <Entry key={entry.id} entry={entry} />)
+          entries.map((entry, i) => <Entry key={entry.id} entry={entry} latest={i === lastUndoable} />)
         )}
         {busy && <p className="agent-chat-working">Working…</p>}
       </div>
@@ -150,16 +155,24 @@ export function AgentChat({ docked = false }: { docked?: boolean }) {
   )
 }
 
-function Entry({ entry }: { entry: ChatEntry }) {
+function Entry({ entry, latest }: { entry: ChatEntry; latest: boolean }) {
   switch (entry.kind) {
     case 'user':
       return <p className="agent-chat-msg agent-chat-user">{entry.text}</p>
     case 'agent':
       return <p className="agent-chat-msg agent-chat-agent">{entry.text}</p>
     case 'tool':
+      // Read-only tools (looking at the chart) say nothing; a change reads as
+      // the plain line the tool logged, with Undo on the newest one.
+      if (!entry.summary && entry.ok) return null
       return (
         <p className={`agent-chat-tool${entry.ok ? '' : ' failed'}`}>
-          <span aria-hidden="true">{entry.ok ? '✓' : '×'}</span> {entry.name.replace(/_/g, ' ')}
+          {entry.summary ?? `Couldn't ${entry.name.replace(/_/g, ' ')}`}
+          {latest && (
+            <button type="button" className="agent-chat-undo" onClick={() => useStore.getState().undo()}>
+              Undo
+            </button>
+          )}
         </p>
       )
     case 'notice':

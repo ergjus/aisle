@@ -189,6 +189,58 @@
     letter-spacing: -0.01em;
   }
 
+  /* ---- how the seating stands ---------------------------------------- */
+
+  .chart-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    border: 1px solid var(--color-hairline);
+    border-radius: 999px;
+    background: var(--color-card);
+    padding: 0 12px 0 10px;
+    font-size: 12.5px;
+    color: var(--color-ink-soft);
+    white-space: nowrap;
+  }
+
+  .chart-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--color-ink-faint);
+  }
+
+  .chart-status-sep { color: var(--color-ink-faint); }
+
+  .chart-status-complete { border-color: color-mix(in oklab, var(--color-sage) 45%, var(--color-hairline)); color: var(--color-sage); }
+  .chart-status-complete .chart-status-dot { background: var(--color-ok); }
+
+  .chart-status-broken { border-color: color-mix(in oklab, var(--color-brick) 45%, var(--color-hairline)); color: var(--color-brick); }
+  .chart-status-broken .chart-status-dot { background: var(--color-brick); }
+
+  .chart-status-fix {
+    margin-left: 2px;
+    border-radius: 999px;
+    background: var(--color-brick);
+    padding: 1px 9px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--color-ivory);
+  }
+
+  .chart-status-fix:hover { background: color-mix(in oklab, var(--color-brick) 85%, black); }
+
+  .chart-status-fix:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 900px) {
+    .chart-status { display: none; }
+  }
+
   /* ---- the masthead ------------------------------------------------------- */
 
   .masthead {
@@ -281,87 +333,6 @@
     outline-offset: -2px;
   }
 
-  /* ---- the agent's place card --------------------------------------------- */
-
-  .placecard {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    max-width: 260px;
-    border: 1px solid var(--color-hairline);
-    border-top: 2px solid var(--color-ink-faint);
-    border-radius: 3px;
-    background: var(--color-card);
-    padding: 4px 12px 5px 10px;
-    color: var(--color-ink-soft);
-    text-align: left;
-    white-space: nowrap;
-    box-shadow:
-      0 1px 0 rgba(41, 36, 29, 0.05),
-      0 8px 16px -10px rgba(41, 36, 29, 0.35);
-    transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
-  }
-
-  .placecard:hover {
-    transform: translateY(-1px);
-    border-color: var(--color-gold);
-    box-shadow:
-      0 1px 0 rgba(41, 36, 29, 0.05),
-      0 12px 22px -12px rgba(41, 36, 29, 0.45);
-  }
-
-  .placecard:focus-visible {
-    outline: 2px solid var(--color-ring);
-    outline-offset: 2px;
-  }
-
-  .placecard-ready { border-top-color: var(--color-ok); }
-  .placecard-live { border-top-color: var(--color-gold); }
-
-  .placecard-name {
-    max-width: 100%;
-    overflow: hidden;
-    font-family: var(--font-serif);
-    font-size: 14.5px;
-    font-weight: 600;
-    color: var(--color-ink);
-    text-overflow: ellipsis;
-  }
-
-  .placecard-meta {
-    margin-top: 2px;
-    max-width: 100%;
-    overflow: hidden;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--color-ink-soft);
-    text-overflow: ellipsis;
-  }
-
-  .placecard-dot {
-    width: 7px;
-    height: 7px;
-    flex: none;
-    border-radius: 50%;
-    background: var(--color-ink-faint);
-  }
-
-  .placecard-ready .placecard-dot { background: var(--color-ok); }
-
-  .placecard-live .placecard-dot {
-    background: var(--color-gold);
-    animation: placecard-pulse 1.8s ease-out infinite;
-  }
-
-  @keyframes placecard-pulse {
-    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-gold) 55%, transparent); }
-    100% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--color-gold) 0%, transparent); }
-  }
-
-  @media (max-width: 900px) {
-    .placecard-meta { display: none; }
-  }
 }
 
 @layer base {
@@ -463,13 +434,6 @@
 }
 
 .welcome-kicker,
-.welcome-coach-kicker {
-  color: var(--color-gold-bright);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-}
 
 .welcome-intro h2,
 .welcome-reveal h2 {
@@ -553,13 +517,6 @@
 }
 
 .welcome-intro-actions,
-.welcome-coach-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
 
 .welcome-intro-actions [data-slot='button']:first-child,
 .welcome-reveal > [data-slot='button'] {
@@ -622,57 +579,12 @@
   font-size: 16px;
 }
 
-.welcome-coach {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 70;
-  display: flex;
-  width: min(380px, calc(100vw - 32px));
-  flex-direction: column;
-  gap: 10px;
-  border: 1px solid color-mix(in srgb, var(--color-gold) 58%, var(--color-border));
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--color-card) 96%, transparent);
-  padding: 18px;
-  color: var(--color-foreground);
-  box-shadow: 0 22px 64px rgba(4, 10, 6, 0.34);
-  backdrop-filter: blur(14px);
-}
 
-.welcome-coach-top {
-  top: 76px;
-  bottom: auto;
-}
 
-.welcome-coach h2 {
-  font-family: var(--font-heading);
-  font-size: 25px;
-  font-weight: 600;
-  line-height: 1;
-}
 
-.welcome-coach p:not(.welcome-coach-kicker) {
-  color: var(--color-muted-foreground);
-  font-size: 13px;
-  line-height: 1.55;
-}
 
-.welcome-coach-actions {
-  justify-content: flex-end;
-  padding-top: 2px;
-}
 
-.welcome-coach-complete > svg {
-  color: var(--color-gold-ink);
-}
 
-.welcome-tour-highlight {
-  position: relative;
-  outline: 3px solid var(--color-gold-bright) !important;
-  outline-offset: 4px;
-  box-shadow: 0 0 0 9px color-mix(in srgb, var(--color-gold) 20%, transparent), 0 0 34px color-mix(in srgb, var(--color-gold) 28%, transparent) !important;
-}
 
 @media (max-width: 640px) {
   .welcome-intro,
@@ -689,8 +601,6 @@
   .welcome-sketch { width: min(430px, 92vw); }
   .welcome-questionnaire-shell { align-items: start; padding: 12px; }
   .welcome-card { max-height: calc(100dvh - 24px); }
-  .welcome-coach { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
-  .welcome-coach-top { top: 66px; bottom: auto; }
 }
 
 @media (max-width: 480px) {
@@ -764,5 +674,4 @@
     stroke-dashoffset: 0;
   }
 
-  .welcome-tour-highlight { transition: none; }
 }

@@ -3,7 +3,6 @@ import { layoutConflicts } from '../geometry'
 import type { PersonalizedDemoConfig } from '../types'
 import {
   VENUE_FEATURE_IDS,
-  amenitiesForPriority,
   attendingSampleGuests,
   buildTablePlan,
   expandVenuePreset,
@@ -20,7 +19,6 @@ function config(patch: Partial<PersonalizedDemoConfig> = {}): PersonalizedDemoCo
     tableStyle: 'round',
     seatsPerTable: 8,
     amenities: ['entrance', 'dance_floor', 'band', 'bathroom'],
-    priority: 'family_harmony',
     ...patch,
   }
 }
@@ -54,21 +52,18 @@ describe('personalized demo planner', () => {
       const preset = expandVenuePreset(venuePreset)
       for (const tableStyle of ['round', 'banquet', 'mixed'] as const) {
         for (const seatsPerTable of [6, 8, 10] as const) {
-          for (const priority of ['family_harmony', 'dance_floor_energy', 'easy_arrivals'] as const) {
-            const result = planPersonalizedSample({
-              venuePreset,
-              widthFt: preset.widthFt,
-              lengthFt: preset.lengthFt,
-              tableStyle,
-              seatsPerTable,
-              amenities: [...VENUE_FEATURE_IDS],
-              priority,
-            })
-            expect(
-              result.ok,
-              `${venuePreset} ${tableStyle}/${seatsPerTable}/${priority}: ${result.ok ? '' : result.message}`,
-            ).toBe(true)
-          }
+          const result = planPersonalizedSample({
+            venuePreset,
+            widthFt: preset.widthFt,
+            lengthFt: preset.lengthFt,
+            tableStyle,
+            seatsPerTable,
+            amenities: [...VENUE_FEATURE_IDS],
+          })
+          expect(
+            result.ok,
+            `${venuePreset} ${tableStyle}/${seatsPerTable}: ${result.ok ? '' : result.message}`,
+          ).toBe(true)
         }
       }
     },
@@ -83,13 +78,7 @@ describe('personalized demo planner', () => {
     })
   })
 
-  it('enforces the focus-specific amenity requirements', () => {
-    expect(amenitiesForPriority([], 'family_harmony')).toEqual([])
-    expect(amenitiesForPriority(['bar'], 'dance_floor_energy')).toEqual(['dance_floor', 'bar'])
-    expect(amenitiesForPriority(['bar'], 'easy_arrivals')).toEqual(['entrance', 'bar'])
-  })
-
-  it.each([6, 8, 10] as const)('creates enough %i-seat tables with challenge spare capacity', (seatsPerTable) => {
+  it.each([6, 8, 10] as const)('creates enough %i-seat tables with spare capacity', (seatsPerTable) => {
     const input = config({ seatsPerTable })
     const tables = buildTablePlan(input)
     expect(tables.reduce((sum, table) => sum + table.seats, 0)).toBeGreaterThanOrEqual(personalizedCapacityTarget(input))

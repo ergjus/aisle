@@ -1096,10 +1096,6 @@ export function Canvas() {
             {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)}
           </span>
           <span className="title-block-cell">
-            <b>Drawn by</b>
-            {s.agentConnected ? 'You & the agent' : 'You'}
-          </span>
-          <span className="title-block-cell">
             <b>Rev.</b>
             {s.undoStack.length}
           </span>

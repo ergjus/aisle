@@ -8,7 +8,7 @@ import { Editors } from './components/Editors'
 import { AgentChat } from './components/AgentChat'
 import { probeHostedAgent, useHostedAgent } from './agent/hosted'
 import { SharedViewBar, SharedViewError } from './components/SharedViewBar'
-import { readFirstRunGate, readOnboardingRecord } from './onboarding/storage'
+import { readFirstRunGate } from './onboarding/storage'
 
 const OnboardingExperience = lazy(() => import('./onboarding/OnboardingExperience'))
 
@@ -41,14 +41,13 @@ export default function App() {
     if (state.viewMode === 'shared') return false
     return readFirstRunGate(state.guestOrder.length > 0 || state.tableOrder.length > 0)
   })
-  const [guideRequest, setGuideRequest] = useState(0)
+  const [sampleRoomRequest, setSampleRoomRequest] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
   const agentReady = useHostedAgent((s) => s.status === 'ready')
   const agentOpen = useHostedAgent((s) => s.open)
   const [loadOnboardingBundle, setLoadOnboardingBundle] = useState(() => {
     if (useStore.getState().viewMode === 'shared') return false
-    const record = readOnboardingRecord()
-    return initialFirstRun || record?.challenge.status === 'active'
+    return initialFirstRun
   })
 
   const setSidebar = useCallback((open: boolean) => {
@@ -100,9 +99,9 @@ export default function App() {
   return (
     <div className={cn('grid h-screen', shared ? 'grid-rows-[auto_auto_minmax(0,1fr)]' : 'grid-rows-[auto_minmax(0,1fr)]')}>
       <Header
-        onWelcomeGuide={() => {
+        onSampleRoom={() => {
           setLoadOnboardingBundle(true)
-          setGuideRequest((request) => request + 1)
+          setSampleRoomRequest((request) => request + 1)
         }}
       />
       {shared ? (
@@ -141,7 +140,7 @@ export default function App() {
       )}
       {loadOnboardingBundle && !shared ? (
         <Suspense fallback={null}>
-          <OnboardingExperience initialFirstRun={initialFirstRun} guideRequest={guideRequest} />
+          <OnboardingExperience initialFirstRun={initialFirstRun} sampleRoomRequest={sampleRoomRequest} />
         </Suspense>
       ) : null}
       {toast && (

@@ -38,8 +38,6 @@ export type VenuePreset = 'ballroom' | 'garden_tent' | 'restaurant' | 'custom'
 
 type DemoTableStyle = 'round' | 'banquet' | 'mixed'
 
-export type DemoPriority = 'family_harmony' | 'dance_floor_energy' | 'easy_arrivals'
-
 export interface PersonalizedDemoConfig {
   venuePreset: VenuePreset
   widthFt: number
@@ -47,7 +45,6 @@ export interface PersonalizedDemoConfig {
   tableStyle: DemoTableStyle
   seatsPerTable: 6 | 8 | 10
   amenities: VenueFeatureId[]
-  priority: DemoPriority
 }
 
 interface PersonalizedDemoMetadata {

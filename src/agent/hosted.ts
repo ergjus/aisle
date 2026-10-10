@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useStore } from '../store'
 import { allToolDefinitions, currentTools } from '../webmcp/tools'
 import { AGENT_ENDPOINT, type AgentStatus, type AgentToolSpec } from './protocol'
 
@@ -40,7 +41,7 @@ interface StepReply {
 export type ChatEntry =
   | { id: number; kind: 'user'; text: string }
   | { id: number; kind: 'agent'; text: string }
-  | { id: number; kind: 'tool'; name: string; ok: boolean }
+  | { id: number; kind: 'tool'; name: string; ok: boolean; summary: string | null; undoable: boolean }
   | { id: number; kind: 'notice'; text: string; tone: 'info' | 'error' }
 
 type NewEntry = ChatEntry extends infer E ? (E extends ChatEntry ? Omit<E, 'id'> : never) : never
@@ -209,8 +210,23 @@ export async function sendToAgent(text: string): Promise<void> {
         } else if (ctl.signal.aborted) {
           outcome = { text: 'The person stopped you before this call ran.', isError: true }
         } else {
+          const before = useStore.getState()
+          const logged = before.agentLog[0]?.id
+          const undoDepth = before.undoStack.length
           outcome = await runTool(use.name, use.input)
-          addEntry({ kind: 'tool', name: use.name, ok: !outcome.isError })
+          const after = useStore.getState()
+          // The tool's own activity line is what the person reads — "Seated 72
+          // guests", not the tool's name — with Undo offered when it changed
+          // the chart.
+          const fresh = logged ? after.agentLog.slice(0, Math.max(0, after.agentLog.findIndex((entry) => entry.id === logged))) : after.agentLog
+          const line = fresh.find((entry) => entry.source === 'agent')
+          addEntry({
+            kind: 'tool',
+            name: use.name,
+            ok: !outcome.isError,
+            summary: line?.summary ?? null,
+            undoable: !outcome.isError && after.undoStack.length > undoDepth,
+          })
         }
         results.push({
           type: 'tool_result',
