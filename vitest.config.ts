@@ -14,5 +14,7 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: true,
     restoreMocks: true,
+    // Agent worktrees live under .claude/; they are separate checkouts.
+    exclude: ['**/node_modules/**', '**/dist/**', '.claude/**'],
   },
 })
