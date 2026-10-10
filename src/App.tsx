@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { cn } from '@/lib/utils'
 import { useStore } from './store'
 import { Header } from './components/Header'
@@ -6,7 +6,7 @@ import { Sidebar } from './components/Sidebar'
 import { Canvas } from './components/Canvas'
 import { Editors } from './components/Editors'
 import { AgentChat } from './components/AgentChat'
-import { probeHostedAgent } from './agent/hosted'
+import { probeHostedAgent, useHostedAgent } from './agent/hosted'
 import { SharedViewBar, SharedViewError } from './components/SharedViewBar'
 import { readFirstRunGate, readOnboardingRecord } from './onboarding/storage'
 
@@ -43,6 +43,8 @@ export default function App() {
   })
   const [guideRequest, setGuideRequest] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
+  const agentReady = useHostedAgent((s) => s.status === 'ready')
+  const agentOpen = useHostedAgent((s) => s.open)
   const [loadOnboardingBundle, setLoadOnboardingBundle] = useState(() => {
     if (useStore.getState().viewMode === 'shared') return false
     const record = readOnboardingRecord()
@@ -112,19 +114,29 @@ export default function App() {
         </>
       ) : (
         <>
-          {/* The sidebar folds down to a rail so the floor plan can have the whole
-              window; the grid column animates rather than snapping. */}
+          {/* Two sidebars around the floor plan: the agent's chat on the left
+              and the plan on the right. Each folds down to a rail so the floor
+              plan can have the room; the columns animate rather than snapping. */}
           <div
             className={cn(
               'grid min-h-0 grid-cols-1 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none',
-              sidebarOpen ? 'md:grid-cols-[248px_minmax(0,1fr)]' : 'md:grid-cols-[56px_minmax(0,1fr)]',
+              'md:grid-cols-[var(--agent-col)_minmax(0,1fr)_var(--plan-col)]',
             )}
+            style={{
+              '--agent-col': agentReady ? (agentOpen ? '320px' : '44px') : '0px',
+              '--plan-col': sidebarOpen ? '248px' : '56px',
+            } as CSSProperties}
           >
-            <Sidebar open={sidebarOpen} onOpenChange={setSidebar} />
+            <div className="hidden min-h-0 overflow-hidden md:flex md:flex-col">
+              <AgentChat docked />
+            </div>
             <Canvas />
+            <Sidebar open={sidebarOpen} onOpenChange={setSidebar} />
           </div>
           <Editors />
-          <AgentChat />
+          <div className="md:hidden">
+            <AgentChat />
+          </div>
         </>
       )}
       {loadOnboardingBundle && !shared ? (

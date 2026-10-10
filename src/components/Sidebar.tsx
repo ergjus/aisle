@@ -1435,7 +1435,8 @@ function CollapseToggle(props: { open: boolean; onClick: () => void }) {
       title={`${props.open ? 'Collapse' : 'Expand'} the sidebar (⌘B)`}
       onClick={props.onClick}
     >
-      <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', props.open && 'rotate-180')} aria-hidden="true" />
+      {/* The plan sits on the right, so the chevron points the way it will fold. */}
+      <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', !props.open && 'rotate-180')} aria-hidden="true" />
     </button>
   )
 }
@@ -1455,7 +1456,7 @@ function SidebarRail(props: {
   return (
     <aside
       id="sidebar-panel"
-      className="hidden min-h-0 flex-col items-center overflow-hidden border-r border-hairline bg-ivory px-1.5 pt-1 pb-3 md:flex"
+      className="hidden min-h-0 flex-col items-center overflow-hidden border-l border-hairline bg-ivory px-1.5 pt-1 pb-3 md:flex"
     >
       <CollapseToggle open={false} onClick={props.onExpand} />
       {/* Each section keeps its icon and its count, set as a legible pair
@@ -1560,7 +1561,7 @@ export function Sidebar({ open: sidebarOpen, onOpenChange }: { open: boolean; on
   return (
     <aside
       id="sidebar-panel"
-      className="hidden min-h-0 flex-col overflow-hidden border-r border-hairline bg-ivory px-2 pt-1 pb-2 md:flex"
+      className="hidden min-h-0 flex-col overflow-hidden border-l border-hairline bg-ivory px-2 pt-1 pb-2 md:flex"
     >
       {/* A slim rail of its own above the sections, so the control sits in the
           same place whether the sidebar is open or folded away. */}

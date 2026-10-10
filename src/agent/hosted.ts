@@ -53,12 +53,37 @@ interface HostedAgentState {
   setOpen: (open: boolean) => void
 }
 
+const OPEN_KEY = 'aisle:agent:open'
+
+/**
+ * Whether the chat starts open. On a wide screen it is a docked sidebar, so it
+ * opens by default; on a phone it floats over the plan, so it waits to be asked.
+ */
+function readAgentOpen(): boolean {
+  try {
+    const stored = localStorage.getItem(OPEN_KEY)
+    if (stored !== null) return stored === '1'
+  } catch {
+    // Fall through to the screen-size default.
+  }
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(min-width: 768px)').matches
+    : false
+}
+
 export const useHostedAgent = create<HostedAgentState>((set) => ({
   status: 'unknown',
-  open: false,
+  open: readAgentOpen(),
   busy: false,
   entries: [],
-  setOpen: (open) => set({ open }),
+  setOpen: (open) => {
+    set({ open })
+    try {
+      localStorage.setItem(OPEN_KEY, open ? '1' : '0')
+    } catch {
+      // Preference simply won't stick.
+    }
+  },
 }))
 
 /** Model steps allowed for one message from the person. */
