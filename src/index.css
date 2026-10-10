@@ -189,6 +189,58 @@
     letter-spacing: -0.01em;
   }
 
+  /* ---- how the seating stands ---------------------------------------- */
+
+  .chart-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    border: 1px solid var(--color-hairline);
+    border-radius: 999px;
+    background: var(--color-card);
+    padding: 0 12px 0 10px;
+    font-size: 12.5px;
+    color: var(--color-ink-soft);
+    white-space: nowrap;
+  }
+
+  .chart-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--color-ink-faint);
+  }
+
+  .chart-status-sep { color: var(--color-ink-faint); }
+
+  .chart-status-complete { border-color: color-mix(in oklab, var(--color-sage) 45%, var(--color-hairline)); color: var(--color-sage); }
+  .chart-status-complete .chart-status-dot { background: var(--color-ok); }
+
+  .chart-status-broken { border-color: color-mix(in oklab, var(--color-brick) 45%, var(--color-hairline)); color: var(--color-brick); }
+  .chart-status-broken .chart-status-dot { background: var(--color-brick); }
+
+  .chart-status-fix {
+    margin-left: 2px;
+    border-radius: 999px;
+    background: var(--color-brick);
+    padding: 1px 9px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--color-ivory);
+  }
+
+  .chart-status-fix:hover { background: color-mix(in oklab, var(--color-brick) 85%, black); }
+
+  .chart-status-fix:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  @media (max-width: 900px) {
+    .chart-status { display: none; }
+  }
+
   /* ---- the masthead ------------------------------------------------------- */
 
   .masthead {
@@ -281,87 +333,6 @@
     outline-offset: -2px;
   }
 
-  /* ---- the agent's place card --------------------------------------------- */
-
-  .placecard {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    max-width: 260px;
-    border: 1px solid var(--color-hairline);
-    border-top: 2px solid var(--color-ink-faint);
-    border-radius: 3px;
-    background: var(--color-card);
-    padding: 4px 12px 5px 10px;
-    color: var(--color-ink-soft);
-    text-align: left;
-    white-space: nowrap;
-    box-shadow:
-      0 1px 0 rgba(41, 36, 29, 0.05),
-      0 8px 16px -10px rgba(41, 36, 29, 0.35);
-    transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
-  }
-
-  .placecard:hover {
-    transform: translateY(-1px);
-    border-color: var(--color-gold);
-    box-shadow:
-      0 1px 0 rgba(41, 36, 29, 0.05),
-      0 12px 22px -12px rgba(41, 36, 29, 0.45);
-  }
-
-  .placecard:focus-visible {
-    outline: 2px solid var(--color-ring);
-    outline-offset: 2px;
-  }
-
-  .placecard-ready { border-top-color: var(--color-ok); }
-  .placecard-live { border-top-color: var(--color-gold); }
-
-  .placecard-name {
-    max-width: 100%;
-    overflow: hidden;
-    font-family: var(--font-serif);
-    font-size: 14.5px;
-    font-weight: 600;
-    color: var(--color-ink);
-    text-overflow: ellipsis;
-  }
-
-  .placecard-meta {
-    margin-top: 2px;
-    max-width: 100%;
-    overflow: hidden;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--color-ink-soft);
-    text-overflow: ellipsis;
-  }
-
-  .placecard-dot {
-    width: 7px;
-    height: 7px;
-    flex: none;
-    border-radius: 50%;
-    background: var(--color-ink-faint);
-  }
-
-  .placecard-ready .placecard-dot { background: var(--color-ok); }
-
-  .placecard-live .placecard-dot {
-    background: var(--color-gold);
-    animation: placecard-pulse 1.8s ease-out infinite;
-  }
-
-  @keyframes placecard-pulse {
-    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-gold) 55%, transparent); }
-    100% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--color-gold) 0%, transparent); }
-  }
-
-  @media (max-width: 900px) {
-    .placecard-meta { display: none; }
-  }
 }
 
 @layer base {
@@ -463,13 +434,6 @@
 }
 
 .welcome-kicker,
-.welcome-coach-kicker {
-  color: var(--color-gold-bright);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-}
 
 .welcome-intro h2,
 .welcome-reveal h2 {
@@ -553,13 +517,6 @@
 }
 
 .welcome-intro-actions,
-.welcome-coach-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
 
 .welcome-intro-actions [data-slot='button']:first-child,
 .welcome-reveal > [data-slot='button'] {
@@ -622,57 +579,12 @@
   font-size: 16px;
 }
 
-.welcome-coach {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 70;
-  display: flex;
-  width: min(380px, calc(100vw - 32px));
-  flex-direction: column;
-  gap: 10px;
-  border: 1px solid color-mix(in srgb, var(--color-gold) 58%, var(--color-border));
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--color-card) 96%, transparent);
-  padding: 18px;
-  color: var(--color-foreground);
-  box-shadow: 0 22px 64px rgba(4, 10, 6, 0.34);
-  backdrop-filter: blur(14px);
-}
 
-.welcome-coach-top {
-  top: 76px;
-  bottom: auto;
-}
 
-.welcome-coach h2 {
-  font-family: var(--font-heading);
-  font-size: 25px;
-  font-weight: 600;
-  line-height: 1;
-}
 
-.welcome-coach p:not(.welcome-coach-kicker) {
-  color: var(--color-muted-foreground);
-  font-size: 13px;
-  line-height: 1.55;
-}
 
-.welcome-coach-actions {
-  justify-content: flex-end;
-  padding-top: 2px;
-}
 
-.welcome-coach-complete > svg {
-  color: var(--color-gold-ink);
-}
 
-.welcome-tour-highlight {
-  position: relative;
-  outline: 3px solid var(--color-gold-bright) !important;
-  outline-offset: 4px;
-  box-shadow: 0 0 0 9px color-mix(in srgb, var(--color-gold) 20%, transparent), 0 0 34px color-mix(in srgb, var(--color-gold) 28%, transparent) !important;
-}
 
 @media (max-width: 640px) {
   .welcome-intro,
@@ -689,8 +601,6 @@
   .welcome-sketch { width: min(430px, 92vw); }
   .welcome-questionnaire-shell { align-items: start; padding: 12px; }
   .welcome-card { max-height: calc(100dvh - 24px); }
-  .welcome-coach { right: 10px; bottom: 10px; width: calc(100vw - 20px); }
-  .welcome-coach-top { top: 66px; bottom: auto; }
 }
 
 @media (max-width: 480px) {
@@ -764,5 +674,427 @@
     stroke-dashoffset: 0;
   }
 
-  .welcome-tour-highlight { transition: none; }
+}
+
+/* ---- the home screen ------------------------------------------------------ */
+
+@layer components {
+  .home {
+    min-height: 0;
+    overflow-y: auto;
+    background:
+      radial-gradient(ellipse at top, color-mix(in srgb, var(--color-parchment) 60%, transparent), transparent 60%),
+      var(--color-ivory);
+  }
+
+  .home-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    width: min(880px, 100%);
+    margin: 0 auto;
+    padding: 48px 24px 64px;
+  }
+
+  .home-kicker {
+    font-size: 13px;
+    color: var(--color-ink-faint);
+  }
+
+  /* The wedding's name, date and venue are written straight onto the page:
+     fields with no box, set like the head of a printed program. */
+  .home-event {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .home-field {
+    display: block;
+    min-width: 0;
+  }
+
+  .home-field input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    padding: 2px 0;
+    color: var(--color-ink);
+    font: inherit;
+    outline: none;
+    transition: border-color 120ms ease;
+  }
+
+  .home-field input::placeholder {
+    color: color-mix(in srgb, var(--color-ink-faint) 70%, transparent);
+  }
+
+  .home-field input:hover,
+  .home-field input:focus {
+    border-bottom-color: var(--color-hairline);
+  }
+
+  .home-field input:focus {
+    border-bottom-color: var(--color-gold);
+  }
+
+  .home-field-title input {
+    font-family: var(--font-serif);
+    font-size: clamp(34px, 5vw, 46px);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: 0.005em;
+  }
+
+  .home-event-line {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 15px;
+    color: var(--color-ink-soft);
+  }
+
+  .home-event-line .home-field { flex: 0 1 auto; max-width: 100%; }
+  .home-event-line .home-field input { color: var(--color-ink-soft); }
+  .home-event-sep { color: var(--color-ink-faint); }
+
+  /* How far along the seating is: one headline, one next step, a bar, a door. */
+  .home-progress {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'text open' 'bar bar';
+    gap: 14px 24px;
+    align-items: center;
+    border: 1px solid var(--color-hairline);
+    border-radius: 14px;
+    background: var(--color-card);
+    padding: 20px 22px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 10px 24px -20px rgba(20, 31, 24, 0.5);
+  }
+
+  .home-progress-text { grid-area: text; min-width: 0; }
+  .home-progress-open { grid-area: open; }
+  .home-progress-bar { grid-area: bar; }
+
+  .home-progress-headline {
+    font-family: var(--font-serif);
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--color-ink);
+  }
+
+  .home-progress-headline .figures { font-size: 24px; }
+
+  .home-progress-next {
+    margin-top: 4px;
+    font-size: 14px;
+    color: var(--color-ink-soft);
+  }
+
+  .home-progress-broken .home-progress-next { color: var(--color-brick); }
+  .home-progress-complete .home-progress-next { color: var(--color-sage); }
+
+  .home-progress-bar {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: var(--color-parchment);
+  }
+
+  .home-progress-bar span {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--color-gold);
+    transition: width 300ms ease;
+  }
+
+  .home-progress-complete .home-progress-bar span { background: var(--color-ok); }
+  .home-progress-broken .home-progress-bar span { background: var(--color-brick); }
+
+  /* Guests, tables, rules: a figure each, each a door into its sidebar section. */
+  .home-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .home-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    border: 1px solid var(--color-hairline);
+    border-radius: 12px;
+    background: var(--color-card);
+    padding: 16px 18px;
+    text-align: left;
+    transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+  }
+
+  .home-tile:hover {
+    border-color: var(--color-gold);
+    box-shadow: 0 10px 24px -18px rgba(20, 31, 24, 0.6);
+    transform: translateY(-1px);
+  }
+
+  .home-tile:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  .home-tile-label { font-size: 13px; color: var(--color-ink-faint); }
+
+  .home-tile-figure {
+    font-size: 30px;
+    font-weight: 500;
+    line-height: 1.1;
+    color: var(--color-ink);
+  }
+
+  .home-tile-detail { font-size: 13px; color: var(--color-ink-soft); }
+  .home-tile-broken .home-tile-detail { color: var(--color-brick); }
+  .home-tile-complete .home-tile-detail { color: var(--color-sage); }
+
+  /* An empty chart: three ways to begin. */
+  .home-start-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .home-start {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    border: 1px solid var(--color-hairline);
+    border-radius: 14px;
+    background: var(--color-card);
+    padding: 20px;
+    text-align: left;
+    transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+  }
+
+  .home-start:hover {
+    border-color: var(--color-gold);
+    box-shadow: 0 10px 24px -18px rgba(20, 31, 24, 0.6);
+    transform: translateY(-1px);
+  }
+
+  .home-start:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  .home-start-icon {
+    width: 22px;
+    height: 22px;
+    color: var(--color-gold-ink);
+  }
+
+  .home-start-title {
+    font-family: var(--font-serif);
+    font-size: 21px;
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--color-ink);
+  }
+
+  .home-start-text {
+    flex: 1;
+    font-size: 13.5px;
+    line-height: 1.45;
+    color: var(--color-ink-soft);
+  }
+
+  .home-start-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-gold-ink);
+  }
+
+  /* The last few things that happened, so a return visit starts in context. */
+  .home-recent-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+
+  .home-link {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font-size: 13px;
+    color: var(--color-gold-ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .home-recent ul {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .home-recent li {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: baseline;
+    border-bottom: 1px solid var(--color-hairline);
+    padding: 9px 0;
+    font-size: 13.5px;
+  }
+
+  .home-recent-who {
+    font-family: var(--font-serif);
+    font-variant-caps: small-caps;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--color-ink-faint);
+  }
+
+  .home-recent-agent { color: var(--color-gold-ink); }
+  .home-recent-text { min-width: 0; color: var(--color-ink); }
+  .home-recent-when { font-size: 12px; color: var(--color-ink-faint); white-space: nowrap; }
+
+  /* The masthead's wordmark is the way home from the floor plan. */
+  .masthead-home {
+    display: inline-flex;
+    align-items: baseline;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    border-radius: 4px;
+  }
+
+  .masthead-home:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 4px;
+  }
+
+  @media (max-width: 720px) {
+    .home-inner { gap: 22px; padding: 28px 16px 48px; }
+    .home-tiles, .home-start-grid { grid-template-columns: 1fr; }
+    .home-progress { grid-template-areas: 'text text' 'bar bar' 'open open'; }
+    .home-progress-open { justify-self: start; }
+    .home-event-line { flex-wrap: wrap; }
+  }
+}
+
+/* ---- the home screen, continued ------------------------------------------ */
+
+@layer components {
+  .home-event-when {
+    flex: none;
+    border: 1px solid color-mix(in srgb, var(--color-gold) 55%, var(--color-hairline));
+    border-radius: 999px;
+    padding: 1px 9px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--color-gold-ink);
+    align-self: center;
+  }
+
+  .home-progress-actions {
+    grid-area: open;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  /* The road from an empty chart to a printed one. */
+  .home-journey {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .home-journey-step > button,
+  .home-journey-step > div {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    border: 0;
+    border-top: 2px solid var(--color-hairline);
+    background: transparent;
+    padding: 10px 6px 4px 0;
+    text-align: left;
+  }
+
+  .home-journey-step > button:hover .home-journey-label { color: var(--color-gold-ink); }
+  .home-journey-step > button:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 2px; border-radius: 4px; }
+
+  .home-journey-done > button,
+  .home-journey-done > div { border-top-color: var(--color-ok); }
+  .home-journey-now > button,
+  .home-journey-now > div { border-top-color: var(--color-gold); }
+
+  .home-journey-mark {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-hairline);
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-ink-faint);
+  }
+
+  .home-journey-mark svg { width: 11px; height: 11px; }
+  .home-journey-done .home-journey-mark { border-color: var(--color-ok); background: var(--color-ok); color: #fff; }
+  .home-journey-now .home-journey-mark { border-color: var(--color-gold); color: var(--color-gold-ink); }
+
+  .home-journey-label {
+    margin-top: 4px;
+    font-family: var(--font-serif);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--color-ink);
+  }
+
+  .home-journey-now .home-journey-label { color: var(--color-gold-ink); }
+  .home-journey-detail { font-size: 12px; color: var(--color-ink-soft); }
+
+  .home-tile-foot {
+    margin-top: 8px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--color-ink-faint);
+  }
+
+  /* RSVP: coming, pending, and the rest not coming. */
+  .home-rsvp {
+    display: flex;
+    width: 100%;
+    height: 5px;
+    margin-top: 10px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--color-brick) 35%, var(--color-parchment));
+  }
+
+  .home-rsvp-yes { background: var(--color-ok); }
+  .home-rsvp-pending { background: var(--color-gold); }
+
+  @media (max-width: 720px) {
+    .home-journey { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .home-progress-actions { grid-area: open; justify-content: flex-start; }
+  }
 }

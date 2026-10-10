@@ -18,6 +18,8 @@ import type {
 import { ROOM, WALL_MARGIN, containDelta, featureBounds, findFreeSpot, freshVenue, freshVenueDimensions, legacyFittedRoomRect, roomRect, stageUnitsPerFoot, tableBounds } from './geometry'
 import { planPersonalizedSample, type PersonalizedPlannerResult } from './onboarding/planner'
 import { launchedFromShareLink } from './share/hash'
+import { EMPTY_EVENT, loadEvent, loadScreen, saveEvent, saveScreen, type EventDetails, type Screen } from './event'
+import { hasEntered, markEntered } from './landing/gate'
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9)
@@ -194,6 +196,10 @@ export interface StoreState extends AisleState {
   sharedView: SharedView | null
   /** The guest a viewer looked up with "find your seat" — spotlit on the canvas. */
   foundGuest: string | null
+  /** The wedding's name, date and venue, as written on the home screen. */
+  event: EventDetails
+  /** Which screen is up: the home screen, or the floor plan with its sidebars. */
+  screen: Screen
 
   snapshot: (label?: string) => void
   undo: () => boolean
@@ -274,6 +280,12 @@ export interface StoreState extends AisleState {
   /** "Make a copy to edit": the shared chart becomes the viewer's own, saved chart. */
   adoptSharedChart: () => void
   setFoundGuest: (id: string | null) => void
+
+  updateEvent: (patch: Partial<EventDetails>) => void
+  /** Through the front door: the visitor is a user now, and lands on the home screen. */
+  enterApp: () => void
+  openHome: () => void
+  openChart: () => void
 }
 
 /** Whether the viewer has a chart of their own saved (one with anything in it). */
@@ -424,6 +436,10 @@ export const useStore = create<StoreState>((set, get) => ({
   viewMode: startsShared ? 'shared' : 'edit',
   sharedView: startsShared ? { status: 'loading' } : null,
   foundGuest: null,
+  event: startsShared ? EMPTY_EVENT : loadEvent(),
+  // A share link opens straight onto the chart it carries; a first-time
+  // visitor gets the front door; everyone else lands where they left off.
+  screen: startsShared ? 'chart' : hasEntered() ? loadScreen() : 'landing',
 
   snapshot: (label = 'change') => {
     const s = get()
@@ -980,19 +996,41 @@ export const useStore = create<StoreState>((set, get) => ({
 
   leaveSharedView: () => {
     if (get().viewMode !== 'shared') return
-    set({ ...loadPersisted(), ...freshSession(), viewMode: 'edit', sharedView: null })
+    set({ ...loadPersisted(), ...freshSession(), viewMode: 'edit', sharedView: null, event: loadEvent() })
   },
 
   adoptSharedChart: () => {
     const s = get()
     if (s.viewMode !== 'shared' || s.sharedView?.status !== 'ready') return
     const core = selectCore(s)
-    set({ ...freshSession(), viewMode: 'edit', sharedView: null })
+    // The copy is this viewer's wedding now: it keeps the title it was shared
+    // under until they write their own.
+    const event = { ...loadEvent(), title: loadEvent().title || s.sharedView.title || '' }
+    set({ ...freshSession(), viewMode: 'edit', sharedView: null, event })
+    saveEvent(event)
     saveChartNow(core)
     get().logActivity('copy', `Made an editable copy of the shared chart${s.sharedView.title ? ` “${s.sharedView.title}”` : ''}.`, 'you')
   },
 
   setFoundGuest: (id) => set({ foundGuest: id }),
+
+  updateEvent: (patch) => {
+    const event = { ...get().event, ...patch }
+    set({ event })
+    if (get().viewMode === 'edit') saveEvent(event)
+  },
+  enterApp: () => {
+    markEntered()
+    get().openHome()
+  },
+  openHome: () => {
+    saveScreen('home')
+    set({ screen: 'home', selection: null, draggingGuest: null, ruleHighlight: null })
+  },
+  openChart: () => {
+    saveScreen('chart')
+    set({ screen: 'chart' })
+  },
 }))
 
 // ---- persistence -----------------------------------------------------------

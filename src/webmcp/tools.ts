@@ -1691,7 +1691,7 @@ function exportTools(): WebTool[] {
           ? String(args.title)
           : store.viewMode === 'shared'
             ? store.sharedView?.title
-            : loadExportOptions().eventTitle
+            : store.event.title || loadExportOptions().eventTitle
         const seated = state.guestOrder.filter((id) => state.seating[id]).length
         const summary =
           `${state.guestOrder.length} guest${state.guestOrder.length === 1 ? '' : 's'} (${seated} seated), ` +
@@ -1898,8 +1898,8 @@ export function initWebMCP(): void {
     }
   })
 
-  // Console escape hatch: lets anyone exercise the exact same tools without an
-  // agent browser — `aisle.tools()` / `aisle.call('auto_arrange', {mode:'full'})`.
+  // Console escape hatch for development: exercise the exact same tools
+  // without an agent — `aisle.tools()` / `aisle.call('auto_arrange', {mode:'full'})`.
   const debug = {
     tools: () => currentTools().map((t) => t.name),
     call: async (name: string, args: Record<string, unknown> = {}) => {
@@ -1910,9 +1910,11 @@ export function initWebMCP(): void {
       return result
     },
   }
-  ;(window as unknown as { aisle: typeof debug }).aisle = debug
+  if (import.meta.env.DEV) {
+    ;(window as unknown as { aisle: typeof debug }).aisle = debug
+  }
 
-  if (!webmcpAvailable()) {
+  if (!webmcpAvailable() && import.meta.env.DEV) {
     console.info(
       '[aisle] No WebMCP surface found (navigator.modelContext / document.modelContext). ' +
         'The app works standalone; agent tools will register automatically in a WebMCP-enabled browser. ' +

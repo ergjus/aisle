@@ -37,7 +37,7 @@ describe('the shared, view-only chart', () => {
     showSharedSample()
     render(
       <>
-        <Header onWelcomeGuide={() => {}} />
+        <Header onSampleRoom={() => {}} />
         <SharedViewBar />
       </>,
     )

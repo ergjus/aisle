@@ -2,27 +2,25 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Link2, Printer } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { selectCore, useStore } from '../store'
-import { computeViolations, dramaScore } from '../constraints'
+import { computeViolations } from '../constraints'
 import { formatFeet } from '../geometry'
 import { SAMPLE } from '../sample'
 import { seatEveryone } from '../actions'
-import { DramaMeter } from './DramaMeter'
+import { ChartStatus } from './ChartStatus'
 import { HeaderMenu, type MenuEntry } from './HeaderMenu'
-import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
-const ToolsPage = lazy(() => import('./ToolsPage').then((module) => ({ default: module.ToolsPage })))
 const ExportDialog = lazy(() => import('./ExportDialog').then((module) => ({ default: module.ExportDialog })))
 const ShortcutsDialog = lazy(() => import('./ShortcutsDialog').then((module) => ({ default: module.ShortcutsDialog })))
 const ShareDialog = lazy(() => import('./ShareDialog').then((module) => ({ default: module.ShareDialog })))
 
 /**
  * The masthead. Reads like the top of a printed program — the wordmark, a
- * dateline of what is on the chart, the drama gauge — with the agent's place
- * card and a single primary action on the right. Everything rarely pressed
- * lives behind the ⋯ menu.
+ * dateline of what is on the chart, one line on how the seating stands — with
+ * a single primary action on the right. Everything rarely pressed lives
+ * behind the ⋯ menu.
  */
-export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
+export function Header({ onSampleRoom }: { onSampleRoom: () => void }) {
   const s = useStore(useShallow((state) => {
     return {
       ...selectCore(state),
@@ -37,9 +35,12 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
       undo: state.undo,
       undoStack: state.undoStack,
       shared: state.viewMode === 'shared',
+      home: state.viewMode !== 'shared' && state.screen === 'home',
+      eventTitle: state.event.title,
+      openHome: state.openHome,
+      openChart: state.openChart,
     }
   }))
-  const [showTools, setShowTools] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showShare, setShowShare] = useState(false)
   const empty = s.guestOrder.length === 0 && s.tableOrder.length === 0
@@ -49,7 +50,7 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
     () => computeViolations(s),
     [s.constraints, s.guestOrder, s.guests, s.seating, s.tableOrder, s.tables, s.venue],
   )
-  const violationCount = violations.length
+  const seated = attending.filter((id) => Boolean(s.seating[id])).length
 
   // "?" opens the shortcut sheet from anywhere that isn't a text field.
   useEffect(() => {
@@ -99,7 +100,7 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
     isSample
       ? { label: 'Remove the sample wedding', onSelect: removeSample }
       : { label: 'Load the sample wedding', hint: '72 guests', onSelect: loadSample },
-    { label: 'Welcome guide', onSelect: onWelcomeGuide },
+    { label: 'Set up a sample room…', onSelect: onSampleRoom },
     { label: 'Keyboard & gestures', hint: '?', onSelect: () => setShowShortcuts(true) },
     'separator',
     { label: 'Reset the chart…', onSelect: reset, danger: true, disabled: empty },
@@ -108,28 +109,49 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
   const dateline = empty
     ? `An empty room · ${formatFeet(s.venueDimensions.widthFt)} × ${formatFeet(s.venueDimensions.lengthFt)}`
     : `${s.guestOrder.length} guests · ${s.tableOrder.length} table${s.tableOrder.length === 1 ? '' : 's'} · ${s.constraints.length} rule${s.constraints.length === 1 ? '' : 's'}`
+  const title = s.eventTitle.trim()
+
+  const wordmark = (
+    <h1 className="masthead-wordmark">
+      <span className="masthead-fleuron" aria-hidden="true">❦</span>
+      Aisle
+    </h1>
+  )
 
   return (
     <header className="masthead">
       <div className="flex min-w-0 items-center gap-4">
-        <h1 className="masthead-wordmark">
-          <span className="masthead-fleuron" aria-hidden="true">❦</span>
-          Aisle
-        </h1>
-        <div className="masthead-rule" aria-hidden="true" />
-        <div className="hidden min-w-0 flex-col leading-none lg:flex">
-          <span className="smallcaps text-[13px] text-ink-soft">On the chart</span>
-          <span className="figures mt-0.5 truncate text-[12px] text-ink-soft">{dateline}</span>
-        </div>
-        <div className="masthead-rule hidden lg:block" aria-hidden="true" />
-        <DramaMeter score={dramaScore(violations)} broken={violationCount} />
+        {s.shared || s.home ? (
+          wordmark
+        ) : (
+          // From the floor plan, the wordmark is the way back home.
+          <button type="button" className="masthead-home" onClick={() => s.openHome()} title="Back to the home screen" aria-label="Home">
+            {wordmark}
+          </button>
+        )}
+        {s.home ? null : (
+          <>
+            <div className="masthead-rule" aria-hidden="true" />
+            <div className="hidden min-w-0 flex-col leading-none lg:flex">
+              <span className="smallcaps truncate text-[13px] text-ink-soft">{s.shared || !title ? 'On the chart' : title}</span>
+              <span className="figures mt-0.5 truncate text-[12px] text-ink-soft">{dateline}</span>
+            </div>
+            <div className="masthead-rule hidden lg:block" aria-hidden="true" />
+            <ChartStatus
+              empty={empty}
+              seated={seated}
+              attending={attending.length}
+              violations={violations}
+              onFix={s.shared ? undefined : () => seatEveryone('repair')}
+            />
+          </>
+        )}
       </div>
 
       <div className="min-w-2 flex-1" />
 
       <div className="flex items-center gap-2.5">
-        <AgentPlacecard onClick={() => setShowTools(true)} />
-        {!s.shared && (
+        {!s.shared && !s.home && (
           <>
             <Button
               data-tour="seat-everyone"
@@ -180,46 +202,10 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
       </div>
 
       <Suspense fallback={null}>
-        {showTools && <ToolsPage onClose={() => setShowTools(false)} />}
         {s.exportOpen && <ExportDialog onClose={() => s.setExportOpen(false)} />}
         {showShortcuts && <ShortcutsDialog open onOpenChange={setShowShortcuts} />}
         {showShare && !s.shared && <ShareDialog onClose={() => setShowShare(false)} />}
       </Suspense>
     </header>
-  )
-}
-
-/**
- * The agent's place card — a seat set for it at the table. Lit gold while an
- * agent is working the chart, sage while WebMCP is ready and waiting, plain
- * when the browser has no agent surface at all. Click to open the toolbox.
- */
-function AgentPlacecard({ onClick }: { onClick: () => void }) {
-  const { agentConnected, webmcpAvailable, toolCount } = useStore(useShallow((state) => ({
-    agentConnected: state.agentConnected,
-    webmcpAvailable: state.webmcpAvailable,
-    toolCount: state.toolNames.length,
-  })))
-
-  const card = agentConnected
-    ? { tone: 'live', name: 'The agent', meta: `at the table · ${toolCount} tools` }
-    : webmcpAvailable
-      ? { tone: 'ready', name: 'A seat for your agent', meta: `${toolCount} tools laid out · WebMCP ready` }
-      : { tone: 'quiet', name: 'A seat for your agent', meta: `${toolCount} tools · no WebMCP in this browser` }
-
-  return (
-    <button
-      type="button"
-      data-tour="webmcp-badge"
-      className={cn('placecard', `placecard-${card.tone}`)}
-      title="This page registers its seating tools with your browser via WebMCP (navigator.modelContext), so an AI agent can work the chart with you. Click to browse every tool."
-      onClick={onClick}
-    >
-      <span className="placecard-dot" aria-hidden="true" />
-      <span className="flex min-w-0 flex-col items-start leading-none">
-        <span className="placecard-name">{card.name}</span>
-        <span className="placecard-meta">{card.meta}</span>
-      </span>
-    </button>
   )
 }

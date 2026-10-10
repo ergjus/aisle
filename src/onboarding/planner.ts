@@ -15,7 +15,6 @@ import {
 import { SAMPLE_CONSTRAINTS, SAMPLE_GUESTS } from '../sample'
 import type {
   AisleState,
-  DemoPriority,
   PersonalizedDemoConfig,
   Table,
   VenueDimensions,
@@ -89,20 +88,6 @@ export function validateDimensions(widthFt: number, lengthFt: number): Dimension
     errors.lengthFt = 'Length must be between 15 and 200 feet.'
   }
   return errors
-}
-
-export function amenitiesForPriority(
-  amenities: VenueFeatureId[],
-  priority: DemoPriority,
-): VenueFeatureId[] {
-  const required = priority === 'dance_floor_energy'
-    ? 'dance_floor'
-    : priority === 'easy_arrivals'
-      ? 'entrance'
-      : null
-  const enabled = new Set(amenities)
-  if (required) enabled.add(required)
-  return VENUE_FEATURE_IDS.filter((id) => enabled.has(id))
 }
 
 export function attendingSampleGuests(): number {
@@ -324,7 +309,7 @@ export function planPersonalizedSample(config: PersonalizedDemoConfig): Personal
     lengthFt: config.lengthFt,
     snapFt: 1,
   }
-  const enabledAmenities = amenitiesForPriority(config.amenities, config.priority)
+  const enabledAmenities = VENUE_FEATURE_IDS.filter((id) => config.amenities.includes(id))
   const venue = placeVenueFeatures(venueDimensions, enabledAmenities)
   if (!venue) {
     return {

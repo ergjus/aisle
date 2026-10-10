@@ -2,17 +2,19 @@ import { lazy, Suspense, useCallback, useEffect, useState, type CSSProperties } 
 import { cn } from '@/lib/utils'
 import { useStore } from './store'
 import { Header } from './components/Header'
+import { Home, type PlanSection } from './components/Home'
+import { Landing } from './components/Landing'
 import { Sidebar } from './components/Sidebar'
 import { Canvas } from './components/Canvas'
 import { Editors } from './components/Editors'
 import { AgentChat } from './components/AgentChat'
 import { probeHostedAgent, useHostedAgent } from './agent/hosted'
 import { SharedViewBar, SharedViewError } from './components/SharedViewBar'
-import { readFirstRunGate, readOnboardingRecord } from './onboarding/storage'
 
 const OnboardingExperience = lazy(() => import('./onboarding/OnboardingExperience'))
 
 const SIDEBAR_KEY = 'aisle:sidebar:collapsed'
+const SIDEBAR_SECTION_KEY = 'aisle:sidebar:active'
 
 function readSidebarOpen(): boolean {
   try {
@@ -35,26 +37,35 @@ export default function App() {
   const setToast = useStore((s) => s.setToast)
   const shared = useStore((s) => s.viewMode === 'shared')
   const sharedView = useStore((s) => s.sharedView)
-  const [initialFirstRun] = useState(() => {
-    const state = useStore.getState()
-    // Someone opening a share link came to see that chart, not a welcome tour.
-    if (state.viewMode === 'shared') return false
-    return readFirstRunGate(state.guestOrder.length > 0 || state.tableOrder.length > 0)
-  })
-  const [guideRequest, setGuideRequest] = useState(0)
+  const screen = useStore((s) => s.screen)
+  const landing = screen === 'landing' && !shared
+  const home = screen === 'home' && !shared
+  const [sampleRoomRequest, setSampleRoomRequest] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
   const agentReady = useHostedAgent((s) => s.status === 'ready')
   const agentOpen = useHostedAgent((s) => s.open)
-  const [loadOnboardingBundle, setLoadOnboardingBundle] = useState(() => {
-    if (useStore.getState().viewMode === 'shared') return false
-    const record = readOnboardingRecord()
-    return initialFirstRun || record?.challenge.status === 'active'
-  })
+  // The questionnaire bundle loads only once someone asks for a sample room;
+  // a first visit lands on the home screen, which offers the ways to begin.
+  const [loadOnboardingBundle, setLoadOnboardingBundle] = useState(false)
 
   const setSidebar = useCallback((open: boolean) => {
     setSidebarOpen(open)
     persistSidebarOpen(open)
   }, [])
+
+  // From the home screen into the floor plan, opening the plan sidebar on the
+  // section the tile named (the sidebar reads its section when it mounts).
+  const openChart = useCallback((section?: PlanSection) => {
+    if (section) {
+      try {
+        localStorage.setItem(SIDEBAR_SECTION_KEY, section)
+      } catch {
+        // The chart still opens, just on whatever section it had.
+      }
+      setSidebar(true)
+    }
+    useStore.getState().openChart()
+  }, [setSidebar])
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen((open) => {
@@ -71,7 +82,9 @@ export default function App() {
       const key = e.key.toLowerCase()
       if (key !== 'z' && key !== 'b') return
       // A shared chart is view-only: no history to walk, no sidebar to fold.
-      if (useStore.getState().viewMode === 'shared') return
+      // The home screen has neither, either.
+      const state = useStore.getState()
+      if (state.viewMode === 'shared' || state.screen !== 'chart') return
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       e.preventDefault()
@@ -97,12 +110,16 @@ export default function App() {
     return () => clearTimeout(t)
   }, [toast, setToast])
 
+  // The front door stands on its own: no masthead, no chart, nothing loaded
+  // that a visitor hasn't asked for yet.
+  if (landing) return <Landing />
+
   return (
     <div className={cn('grid h-screen', shared ? 'grid-rows-[auto_auto_minmax(0,1fr)]' : 'grid-rows-[auto_minmax(0,1fr)]')}>
       <Header
-        onWelcomeGuide={() => {
+        onSampleRoom={() => {
           setLoadOnboardingBundle(true)
-          setGuideRequest((request) => request + 1)
+          setSampleRoomRequest((request) => request + 1)
         }}
       />
       {shared ? (
@@ -112,6 +129,8 @@ export default function App() {
           <SharedViewBar />
           {sharedView?.status === 'error' ? <SharedViewError message={sharedView.error ?? ''} /> : <Canvas />}
         </>
+      ) : home ? (
+        <Home onOpenChart={openChart} />
       ) : (
         <>
           {/* Two sidebars around the floor plan: the agent's chat on the left
@@ -141,7 +160,7 @@ export default function App() {
       )}
       {loadOnboardingBundle && !shared ? (
         <Suspense fallback={null}>
-          <OnboardingExperience initialFirstRun={initialFirstRun} guideRequest={guideRequest} />
+          <OnboardingExperience initialFirstRun={false} sampleRoomRequest={sampleRoomRequest} />
         </Suspense>
       ) : null}
       {toast && (

@@ -10,7 +10,6 @@ const config: PersonalizedDemoConfig = {
   tableStyle: 'round',
   seatsPerTable: 8,
   amenities: ['entrance', 'dance_floor', 'band', 'bathroom'],
-  priority: 'family_harmony',
 }
 
 function reloadPersonalizedDemo() {

@@ -6,7 +6,6 @@ import {
   recordOnboardingCompletion,
   recordOnboardingSkip,
   shouldShowFirstRun,
-  updatePersistedChallenge,
 } from './storage'
 
 const config: PersonalizedDemoConfig = {
@@ -16,7 +15,6 @@ const config: PersonalizedDemoConfig = {
   tableStyle: 'round',
   seatsPerTable: 8,
   amenities: ['entrance'],
-  priority: 'easy_arrivals',
 }
 
 describe('first-run and onboarding persistence', () => {
@@ -31,20 +29,21 @@ describe('first-run and onboarding persistence', () => {
 
   it('stores skipped and completed states separately from the chart', () => {
     recordOnboardingSkip()
-    expect(readOnboardingRecord()).toMatchObject({ status: 'skipped', challenge: { status: 'skipped' } })
+    expect(readOnboardingRecord()).toMatchObject({ status: 'skipped', lastConfiguration: null })
 
     localStorage.removeItem(ONBOARDING_STORAGE_KEY)
     recordOnboardingCompletion(config)
     expect(readOnboardingRecord()).toMatchObject({
       status: 'completed',
       lastConfiguration: config,
-      challenge: { status: 'active', step: 0 },
     })
   })
 
-  it('reloads and resumes an active challenge step', () => {
-    recordOnboardingCompletion(config)
-    updatePersistedChallenge({ step: 2 })
-    expect(readOnboardingRecord()?.challenge).toEqual({ status: 'active', step: 2 })
+  it('still reads records written while the guided challenge existed', () => {
+    localStorage.setItem(
+      ONBOARDING_STORAGE_KEY,
+      JSON.stringify({ version: 1, status: 'completed', lastConfiguration: config, challenge: { status: 'active', step: 2 } }),
+    )
+    expect(readOnboardingRecord()).toEqual({ version: 1, status: 'completed', lastConfiguration: config })
   })
 })

@@ -1866,10 +1866,21 @@
 }
 
 .agent-chat-tool {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.35;
   color: var(--color-gold-ink);
 }
+
+.agent-chat-undo {
+  margin-left: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-gold-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.agent-chat-undo:hover { color: var(--color-ink); }
 
 .agent-chat-tool.failed {
   color: var(--color-ink-faint);

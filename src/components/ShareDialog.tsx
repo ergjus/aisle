@@ -19,7 +19,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 export function ShareDialog({ onClose }: { onClose: () => void }) {
   const core = useStore(useShallow(selectCore))
   const logActivity = useStore((state) => state.logActivity)
-  const [title, setTitle] = useState(() => loadExportOptions().eventTitle)
+  const eventTitle = useStore((state) => state.event.title)
+  const [title, setTitle] = useState(() => eventTitle || loadExportOptions().eventTitle)
   const [includeNotes, setIncludeNotes] = useState(false)
   const [link, setLink] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
