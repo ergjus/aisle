@@ -170,6 +170,10 @@ aisle.call('export_chart', { title: 'June & Ravi', paper: 'letter' })  // opens 
 aisle.call('wrap_up', { summary: 'Everyone is seated and both feuds are resolved.' })
 ```
 
+**Any other browser: the built-in agent.** WebMCP is still rare, so Aisle also carries its own agent. When the deployment has an API key configured, a **Plan with the agent** button appears in the corner: you type in a small chat panel, and the same cursor works the same chart with the same tools. The loop runs in the page and calls the very tool objects a WebMCP agent would, so pins, undo, proposals and the activity feed all behave identically; a small serverless function (`api/agent.ts`) holds the key and the system prompt and takes one model step per request. The guest list never leaves the browser except as part of the conversation sent to the model.
+
+To turn it on, set `ANTHROPIC_API_KEY` on the Vercel project (optionally `AISLE_AGENT_MODEL` and `AISLE_AGENT_EFFORT`). Locally, put the same variables in `.env.local` (see `.env.example`) and `npm run dev` serves the function too. Without a key the button simply doesn't appear.
+
 ## Running locally
 
 ```bash
@@ -179,7 +183,7 @@ npm run build   # static build in dist/
 npm test        # 125 tests across 15 files (Vitest + Testing Library)
 ```
 
-Vite + React 19 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. No backend; deploys as a static site (this repo auto-deploys to Vercel on push).
+Vite + React 19 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. Deploys as a static site plus one optional serverless function for the built-in agent (this repo auto-deploys to Vercel on push).
 
 The tests cover the parts that would be miserable to verify by hand: the tool layer and its dynamic registration, proposal and question lifecycles under concurrency, pinned seats through the solver and the agent's tools, the geometry and zone bands, spreadsheet parsing, export pagination, the onboarding challenge state machine, and the sidebar's interaction details.
 
@@ -189,6 +193,8 @@ The tests cover the parts that would be miserable to verify by hand: the tool la
 src/
   webmcp/tools.ts        every tool definition, JSON Schemas, and the registration diff
   webmcp/adapter.ts      navigator/document/window.modelContext detection + fallbacks
+  agent/                 the built-in agent: in-page loop, wire protocol, system prompt
+api/agent.ts             serverless step function for the built-in agent (holds the API key)
   store.ts               single Zustand store: chart state, undo/redo, activity feed
   solver.ts              the seating solver (full + minimal-repair modes)
   constraints.ts         rule evaluation, violations, drama score

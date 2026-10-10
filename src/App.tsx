@@ -5,6 +5,8 @@ import { Header } from './components/Header'
 import { Sidebar } from './components/Sidebar'
 import { Canvas } from './components/Canvas'
 import { Editors } from './components/Editors'
+import { AgentChat } from './components/AgentChat'
+import { probeHostedAgent } from './agent/hosted'
 import { readFirstRunGate, readOnboardingRecord } from './onboarding/storage'
 
 const OnboardingExperience = lazy(() => import('./onboarding/OnboardingExperience'))
@@ -76,6 +78,10 @@ export default function App() {
   }, [toggleSidebar])
 
   useEffect(() => {
+    void probeHostedAgent()
+  }, [])
+
+  useEffect(() => {
     if (!toast) return
     const t = setTimeout(() => setToast(null), 3500)
     return () => clearTimeout(t)
@@ -101,6 +107,7 @@ export default function App() {
         <Canvas />
       </div>
       <Editors />
+      <AgentChat />
       {loadOnboardingBundle ? (
         <Suspense fallback={null}>
           <OnboardingExperience initialFirstRun={initialFirstRun} guideRequest={guideRequest} />

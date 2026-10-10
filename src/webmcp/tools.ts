@@ -1745,6 +1745,21 @@ export function toolCatalog(): CatalogEntry[] {
   ]
 }
 
+/**
+ * Every tool, gated or not, with what has to be true for it to exist. The
+ * hosted agent offers this whole set up front — its tool list has to stay
+ * identical for a conversation — and answers a call to a gated tool with
+ * what would unlock it, where a WebMCP agent would simply not see the tool.
+ */
+export function allToolDefinitions(): { tool: WebTool; requires: CatalogEntry['requires'] }[] {
+  return [
+    ...baseTools().map((tool) => ({ tool, requires: 'always' as const })),
+    ...seatingTools().map((tool) => ({ tool, requires: 'tables' as const })),
+    ...exportTools().map((tool) => ({ tool, requires: 'content' as const })),
+    ...finalizeTools().map((tool) => ({ tool, requires: 'perfect' as const })),
+  ]
+}
+
 export function initWebMCP(): void {
   const apply = () => {
     const tools = currentTools()
