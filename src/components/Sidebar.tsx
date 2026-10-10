@@ -2,8 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { ChevronRight, History, MapPin, Plus, ShieldCheck, Table2, Users, type LucideIcon } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { selectCore, useStore } from '../store'
-import { groupColors, parseGuestEntries } from '../utils'
-import { SPREADSHEET_ACCEPT, SpreadsheetError, readSpreadsheet } from '../import/spreadsheet'
+import { groupColors } from '../utils'
+import { SPREADSHEET_ACCEPT, SpreadsheetError, describeImport, guestImportFromText, readSpreadsheet } from '../import/spreadsheet'
 import { constraintStatus, constraintText, findDuplicateRule, zoneLabel, zoneNoun, type RuleDraft } from '../constraints'
 import { feetSize, formatFeet, tableSize } from '../geometry'
 import { RULE_PRESETS, draftText, planRulePreset, planSummary, rulePreset, suggestRulePresets, type RulePresetId } from '../presets'
@@ -665,14 +665,18 @@ function GuestsSection() {
   }
 
   const runImport = () => {
-    const entries = parseGuestEntries(importText)
-    if (entries.length === 0) {
+    // Same reader as the agent's import_guests: rows pasted out of Sheets,
+    // Excel or a planning site's export, header or not, or one per line.
+    const sheet = guestImportFromText(importText)
+    if (sheet.entries.length === 0) {
       s.setToast('No guest names found in that text.')
       return
     }
-    const added = s.importGuests(entries)
-    s.setToast(`Imported ${added.length} guest${added.length === 1 ? '' : 's'}.`)
-    s.logActivity('import guests', `Imported ${added.length} guest${added.length === 1 ? '' : 's'} from a pasted list.`, 'you')
+    const added = s.importGuests(sheet.entries)
+    const skipped = sheet.entries.length - added.length
+    const detail = skipped > 0 ? ` (${skipped} already on the list)` : ''
+    s.setToast(`${describeImport(sheet)}. Imported ${added.length}${detail}.`)
+    s.logActivity('import guests', `Imported ${added.length} guest${added.length === 1 ? '' : 's'} from a pasted list${detail}.`, 'you')
     setImportText('')
     setShowImport(false)
   }
@@ -690,7 +694,7 @@ function GuestsSection() {
       const added = s.importGuests(sheet.entries)
       const skipped = sheet.entries.length - added.length
       const detail = skipped > 0 ? ` (${skipped} already on the list)` : ''
-      s.setToast(`Imported ${added.length} guest${added.length === 1 ? '' : 's'} from ${file.name}${detail}.`)
+      s.setToast(`${describeImport(sheet)}. Imported ${added.length} from ${file.name}${detail}.`)
       s.logActivity(
         'import guests',
         `Imported ${added.length} guest${added.length === 1 ? '' : 's'} from ${file.name}${detail}.`,

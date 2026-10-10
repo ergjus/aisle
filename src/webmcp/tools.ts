@@ -7,7 +7,7 @@ import { RULE_PRESETS, planSummary, rulePreset, suggestRulePresets } from '../pr
 import { applyRulePreset } from '../actions'
 import { SAMPLE } from '../sample'
 import { chartMarkdown } from '../utils'
-import { guestEntriesFromText } from '../import/spreadsheet'
+import { describeImport, guestImportFromText } from '../import/spreadsheet'
 import { buildDocModel, chartCSV, type ExportSections, type PaperSize } from '../export/model'
 import { loadExportOptions, saveExportOptions } from '../export/options'
 import { syncTools, webmcpAvailable, type WebTool } from './adapter'
@@ -847,7 +847,7 @@ function baseTools(): WebTool[] {
     ),
     makeTool(
       'import_guests',
-      'Bulk-import guests from pasted text. Rows copied out of a spreadsheet work as-is — CSV, TSV, or semicolon-separated, with or without a header row; a header (Name / Group or Side / RSVP / Dietary / Notes, in any order, and First + Last name as separate columns) is read and its columns mapped. So does one guest per line with fields separated by " — ", " | " or tabs: name, then group, dietary needs, RSVP (yes/no/pending) — e.g. "Nora Flynn — Childhood friends — vegetarian". A JSON array of {name, group, dietary, rsvp, notes} objects also works. Duplicate names are skipped. (To load an .xlsx file, ask the human to use "Import a Spreadsheet…" under Guests, or paste its rows here.)',
+      'Bulk-import guests from pasted text. Rows copied out of a spreadsheet work as-is — CSV, TSV, or semicolon-separated, with or without a header row; a header (Name / Group, Household or Side / RSVP / Meal or Dietary / Notes, in any order, and First + Last name as separate columns) is read and its columns mapped. Guest-list exports from Zola, The Knot and WeddingWire are recognised: partner, plus-one and "Guest 2" columns become guests in the same party, per-event RSVP columns are read with the reception/wedding preferred, and address, email, phone and gift columns are ignored. So does one guest per line with fields separated by " — ", " | " or tabs: name, then group, dietary needs, RSVP (yes/no/pending) — e.g. "Nora Flynn — Childhood friends — vegetarian". A JSON array of {name, group, dietary, rsvp, notes} objects also works. Duplicate names are skipped. (To load an .xlsx file, ask the human to use "Import a Spreadsheet…" under Guests, or paste its rows here.)',
       obj(
         {
           text: str('The pasted guest list'),
@@ -856,12 +856,12 @@ function baseTools(): WebTool[] {
         ['text'],
       ),
       (args) => {
-        const entries = guestEntriesFromText(String(args.text ?? ''), args.default_group ? String(args.default_group) : undefined)
-        if (entries.length === 0) return fail('Could not find any guest names in that text.')
-        const added = useStore.getState().importGuests(entries)
-        const skipped = entries.length - added.length
+        const sheet = guestImportFromText(String(args.text ?? ''), args.default_group ? String(args.default_group) : undefined)
+        if (sheet.entries.length === 0) return fail('Could not find any guest names in that text.')
+        const added = useStore.getState().importGuests(sheet.entries)
+        const skipped = sheet.entries.length - added.length
         return ok(
-          `Imported ${added.length} guest${added.length === 1 ? '' : 's'}${skipped ? ` (${skipped} skipped as duplicates or blank)` : ''}. They are waiting in the lounge.`,
+          `${describeImport(sheet)}. Imported ${added.length} guest${added.length === 1 ? '' : 's'}${skipped ? ` (${skipped} skipped as duplicates or blank)` : ''}. They are waiting in the lounge.`,
           added.map((g) => g.id),
           `Imported ${added.length} guest${added.length === 1 ? '' : 's'} into the lounge.`,
         )
