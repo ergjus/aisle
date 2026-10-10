@@ -179,7 +179,20 @@ npm run build   # static build in dist/
 npm test        # 125 tests across 15 files (Vitest + Testing Library)
 ```
 
-Vite + React 19 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. No backend; deploys as a static site (this repo auto-deploys to Vercel on push).
+Vite + React 19 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. The chart itself runs entirely in the browser; the only server code is Vercel functions in `api/` (this repo auto-deploys to Vercel on push).
+
+### Accounts
+
+Sign-in is passwordless: an email address, then a 6-digit code. [Better Auth](https://better-auth.com) (email OTP plugin) handles sessions, codes and rate limits; users live in [Neon](https://neon.tech) Postgres through Drizzle; codes go out through [Resend](https://resend.com). The server side is in `server/`, mounted at `/api/auth/*` by `api/auth/[...all].ts` (and by `vite.config.ts` under `npm run dev`).
+
+Copy `.env.example` to `.env.local` and fill in `DATABASE_URL`, `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL`. Without `RESEND_API_KEY`, codes are printed to the dev server log instead of emailed.
+
+```bash
+npm run db:generate   # after changing server/db/schema.ts: writes a migration
+npm run db:migrate    # applies migrations to DATABASE_URL
+```
+
+An API function that needs a signed-in user calls `requireSession(request)` from `server/session.ts`.
 
 The tests cover the parts that would be miserable to verify by hand: the tool layer and its dynamic registration, proposal and question lifecycles under concurrency, pinned seats through the solver and the agent's tools, the geometry and zone bands, spreadsheet parsing, export pagination, the onboarding challenge state machine, and the sidebar's interaction details.
 
