@@ -3,6 +3,8 @@ import type { AisleState, Guest, RSVP, Table, VenueFeatureId, ZoneId } from '../
 import { ROOM, WALL_MARGIN, containDelta, featureMinSize, feetSize, formatFeet, layoutConflicts, outOfRoomItems, roomRect, stageUnitsPerFoot, tableBounds, zoneBands } from '../geometry'
 import { computeViolations, constraintStatus, constraintText, dramaLabel, dramaScore, findDuplicateRule } from '../constraints'
 import { autoArrange } from '../solver'
+import { RULE_PRESETS, planSummary, rulePreset, suggestRulePresets } from '../presets'
+import { applyRulePreset } from '../actions'
 import { SAMPLE } from '../sample'
 import { chartMarkdown } from '../utils'
 import { guestEntriesFromText } from '../import/spreadsheet'
@@ -1031,6 +1033,56 @@ function baseTools(): WebTool[] {
           `Rule added [${c.id}]: ${constraintText(getCore(), c)}.${status === 'violated' ? ' It is currently VIOLATED — auto_arrange(mode:"repair") can fix it.' : ''}`,
           [ra.hit.id],
           `New rule: ${constraintText(getCore(), c)}.`,
+        )
+      },
+    ),
+    makeTool(
+      'apply_rule_preset',
+      `Add the rules for a common wedding case in one step — the same presets the human has in the sidebar's House rules. ${RULE_PRESETS.map((p) => `${p.id}: ${p.blurb}`).join(' ')} Presets add ordinary rules (must_sit_together / must_sit_apart / far_from_band / near_dance_floor), skip any the chart already has, and land as one undoable step. Call without guests to get the guests the guest list suggests for that preset — nothing is applied until you name them.`,
+      obj(
+        {
+          preset: str('Which preset', { enum: RULE_PRESETS.map((p) => p.id) }),
+          guests: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Guest names (fuzzy) — two for divorced_parents_apart and plus_ones_together, one or more for away_from_band, two or more for kids_table and head_table',
+          },
+        },
+        ['preset'],
+      ),
+      (args) => {
+        const state = getCore()
+        const preset = rulePreset(String(args.preset ?? ''))
+        if (!preset) return fail(`Unknown preset. Use one of: ${RULE_PRESETS.map((p) => p.id).join(', ')}.`)
+        const queries = Array.isArray(args.guests) ? args.guests : args.guests ? [args.guests] : []
+        if (queries.length === 0) {
+          const hints = suggestRulePresets(state).filter((s) => s.preset === preset.id)
+          if (hints.length === 0) {
+            return ok(`Nothing applied. The guest list doesn't suggest anyone for ${preset.label.toLowerCase()} — name the guests in "guests".`)
+          }
+          return ok(
+            `Nothing applied yet. The guest list suggests:\n${hints
+              .map((s) => `• ${s.guestIds.map((id) => state.guests[id].name).join(', ')} — from ${s.reason}`)
+              .join('\n')}\nConfirm with the human if unsure, then call again with "guests".`,
+          )
+        }
+        const ids: string[] = []
+        for (const q of queries) {
+          const r = resolveGuest(state, q)
+          if ('err' in r) return fail(r.err)
+          ids.push(r.hit.id)
+        }
+        const { plan, added } = applyRulePreset(preset.id, ids)
+        if (plan.error) return fail(plan.error)
+        const warnings = plan.warnings.length > 0 ? `\n⚠ ${plan.warnings.join(' ')}` : ''
+        if (added.length === 0) return ok(`${planSummary(state, plan)}${warnings}`)
+        const after = getCore()
+        const broken = added.filter((c) => constraintStatus(after, c) === 'violated').length
+        const ruleIds = added.map((c) => c.id).join(', ')
+        return ok(
+          `${planSummary(state, plan)} [${ruleIds}]${broken > 0 ? ` ${broken} ${broken === 1 ? 'is' : 'are'} currently VIOLATED — auto_arrange(mode:"repair") can fix that.` : ''}${warnings}`,
+          ids,
+          planSummary(state, plan),
         )
       },
     ),

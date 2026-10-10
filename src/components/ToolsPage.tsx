@@ -45,7 +45,7 @@ const GROUPS: { title: string; blurb: string; names: string[] }[] = [
   {
     title: 'House rules',
     blurb: 'Keep the couple together and the exes apart; the solver obeys.',
-    names: ['add_constraint', 'remove_constraint'],
+    names: ['add_constraint', 'apply_rule_preset', 'remove_constraint'],
   },
   {
     title: 'The deliverable',

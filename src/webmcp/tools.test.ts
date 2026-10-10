@@ -1,8 +1,9 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 // The tool file's own text, so the guard below can read what it actually says.
 import toolsSource from './tools.ts?raw'
 import { useStore } from '../store'
+import { SAMPLE } from '../sample'
 import { currentTools } from './tools'
 
 /** A chart with guests, tables, seating, and no violations registers every tool group. */
@@ -57,5 +58,69 @@ describe('the tool surface', () => {
 
     const offenders = [...new Set(toolsSource.match(looksLikeACall) ?? [])].filter((token) => !names.has(token))
     expect(offenders).toEqual([])
+  })
+})
+
+describe('apply_rule_preset', () => {
+  // No canvas here: ask for reduced motion so the cursor choreography resolves at once.
+  beforeAll(() => {
+    const matchMedia = window.matchMedia
+    window.matchMedia = (query: string) => ({ ...matchMedia(query), matches: query.includes('prefers-reduced-motion') })
+  })
+
+  async function call(args: Record<string, unknown>) {
+    const tool = currentTools().find((t) => t.name === 'apply_rule_preset')!
+    const result = (await tool.execute(args)) as { content: { text: string }[]; isError?: boolean }
+    return { text: result.content[0].text, isError: result.isError === true }
+  }
+
+  function seed() {
+    useStore.getState().resetAll()
+    useStore.getState().loadSample(SAMPLE)
+    useStore.setState({ undoStack: [], redoStack: [], agentLog: [] })
+  }
+
+  it('is always registered, even on an empty chart', () => {
+    useStore.getState().resetAll()
+    expect(currentTools().map((t) => t.name)).toContain('apply_rule_preset')
+  })
+
+  it('resolves guests by fuzzy name and adds the rules as one undoable step', async () => {
+    seed()
+    const before = useStore.getState().constraints.length
+    const reply = await call({ preset: 'head_table', guests: ['Lena Kowalski', 'Dev Patel', 'Rosie'] })
+    expect(reply.isError).toBe(false)
+    expect(reply.text).toMatch(/Head \/ sweetheart table: added 3 rules/)
+    expect(useStore.getState().constraints.length).toBe(before + 3)
+    expect(useStore.getState().agentLog[0]).toMatchObject({ tool: 'apply_rule_preset', source: 'agent' })
+
+    useStore.getState().undo()
+    expect(useStore.getState().constraints.length).toBe(before)
+  })
+
+  it('says so when the rules are already in place', async () => {
+    seed()
+    const reply = await call({ preset: 'divorced_parents_apart', guests: ['Marta', 'Dario'] })
+    expect(reply.isError).toBe(false)
+    expect(reply.text).toMatch(/nothing to add/)
+    expect(useStore.getState().undoStack).toHaveLength(0)
+  })
+
+  it('without guests, lists suggestions and changes nothing', async () => {
+    seed()
+    const before = useStore.getState().constraints
+    const reply = await call({ preset: 'away_from_band' })
+    expect(reply.text).toMatch(/Nothing applied yet/)
+    expect(reply.text).toMatch(/Grandma Adaeze Okafor/)
+    expect(useStore.getState().constraints).toBe(before)
+  })
+
+  it('reports ambiguous guests and contradictions as errors', async () => {
+    seed()
+    expect((await call({ preset: 'plus_ones_together', guests: ['Rossi', 'Maya'] })).text).toMatch(/matches several guests/)
+    const clash = await call({ preset: 'kids_table', guests: ['Jordan', 'Sam'] })
+    expect(clash.isError).toBe(true)
+    expect(clash.text).toMatch(/keeps them apart/)
+    expect((await call({ preset: 'seat_the_dog' })).isError).toBe(true)
   })
 })

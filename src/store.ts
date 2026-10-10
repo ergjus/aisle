@@ -199,6 +199,8 @@ export interface StoreState extends AisleState {
   updateVenueDimensions: (patch: Partial<VenueDimensions>, opts?: { snapshot?: boolean }) => void
 
   addConstraint: (c: DistributiveOmit<Constraint, 'id'> & { id?: string }) => Constraint
+  /** Several rules as one undoable step — what a rule preset adds. */
+  addConstraints: (cs: DistributiveOmit<Constraint, 'id'>[], label?: string) => Constraint[]
   removeConstraint: (id: string) => void
 
   seatGuest: (guestId: string, tableId: string, seat?: number) => { ok: boolean; seat?: number; error?: string }
@@ -665,6 +667,14 @@ export const useStore = create<StoreState>((set, get) => ({
     get().snapshot('add rule')
     const full = { ...c, id: c.id ?? uid() } as Constraint
     set((s) => ({ constraints: [...s.constraints, full], finalized: false }))
+    return full
+  },
+
+  addConstraints: (cs, label = 'add rules') => {
+    if (cs.length === 0) return []
+    get().snapshot(label)
+    const full = cs.map((c) => ({ ...c, id: uid() }) as Constraint)
+    set((s) => ({ constraints: [...s.constraints, ...full], finalized: false }))
     return full
   },
 

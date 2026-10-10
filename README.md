@@ -53,9 +53,9 @@ No login, no backend. State lives in your browser's localStorage.
 
 Aisle registers its tools through `document.modelContext.registerTool(tool, { signal })` — the current spec — and unregisters by aborting each tool's `AbortSignal`, with fallbacks for the deprecated `navigator.modelContext` alias, `unregisterTool()` on Chrome 146–150, and `provideContext({ tools })` on older drafts. Every tool has a `title`, a natural-language description, and a JSON Schema; read-only tools carry `readOnlyHint` (so agent surfaces can auto-approve them) and `untrustedContentHint` (their replies echo guest names and notes that people typed). Guests and tables are addressed by **fuzzy name** — agents say `"Grandma"` or `"Table 4"`, and ambiguity comes back as a helpful error listing candidates.
 
-**41 tools in total.** Click the **agent's place card** in the masthead to browse every one of them, live, with its current registration state — and a list of things to try saying.
+**42 tools in total.** Click the **agent's place card** in the masthead to browse every one of them, live, with its current registration state — and a list of things to try saying.
 
-### Always registered (26)
+### Always registered (27)
 
 | Tool | What it does |
 | --- | --- |
@@ -74,6 +74,7 @@ Aisle registers its tools through `document.modelContext.registerTool(tool, { si
 | `add_group` / `remove_group` | Name a party before anyone is in it; drop one once it's empty |
 | `add_table` | Add a table (2–16 seats, round or banquet) in an open spot — or a whole row of them with `count`, as one undoable step |
 | `add_constraint` | `must_sit_together`, `must_sit_apart`, or near/far rules for the dance floor, band, and entrance |
+| `apply_rule_preset` | The wedding classics in one step — divorced parents apart, kids table, plus-ones together, away from the band, head/sweetheart table. Adds ordinary rules, skips ones already in place, refuses contradictions, and lands as one undo step. Called without guests, it lists who the guest list suggests (notes, groups) and applies nothing — the same presets the human has in the sidebar |
 | `remove_constraint` / `list_constraints` | Manage rules by id or by guest |
 | `undo` / `redo` | The same history the human's ⌘Z walks, agent edits and theirs alike; `steps` walks back several at once |
 | `reset_chart` | Clears the room, exactly as the header's Reset does. Refuses without `confirm: true`, so it can only follow an explicit request |
@@ -112,7 +113,7 @@ Everything the agent can do, you can do by hand on the same state — and everyt
 - **Drag** any guest chip between tables and the lounge; drag tables around the room (zone rules like "near the dance floor" are computed from real table positions, so moving a table can genuinely fix — or cause — a violation). While you hover a chip over a table, the chair it would take pulls out to meet it.
 - **Pin** a seat with **P** (or *Pin seat* in the guest card). A pushpin appears on the chip; *Seat Everyone*, repairs, and the agent all arrange the room around it.
 - **Click** any chip or table to edit details in place — or Tab to it and press Enter; the canvas is keyboard-accessible. Press **?** for the full sheet of keys and gestures.
-- **The sidebar** carries the same five jobs the tools do — **Venue** (room size in feet, amenities toggled and placed), **Tables** (add, reshape, resize, rotate), **Guests** (groups, RSVP, dietary, notes, bulk import), **House rules**, and **Activity**. Collapse it with ⌘B when you want the whole canvas.
+- **The sidebar** carries the same five jobs the tools do — **Venue** (room size in feet, amenities toggled and placed), **Tables** (add, reshape, resize, rotate), **Guests** (groups, RSVP, dietary, notes, bulk import), **House rules** (with one-click **wedding presets** — pick the case, pick the guests, preview the rules — plus suggestions read from guest notes and groups that only ever fill the picker), and **Activity**. Collapse it with ⌘B when you want the whole canvas.
 - **Import a spreadsheet.** Drop an `.xlsx`, `.xlsm`, `.csv`, `.tsv`, or plain text file onto the Guests section and the header row is mapped for you — same code path as the agent's `import_guests`.
 - **Seat Everyone** runs the same solver the agent uses, straight from the header; when rules break, a **"⚠ N rules broken · Fix With Minimal Moves"** banner appears on the chart and repairs the room in one click.
 - **Undo/redo** every change, yours or the agent's (⌘Z / ⇧⌘Z — the veto button).
@@ -180,7 +181,7 @@ To turn it on, set `ANTHROPIC_API_KEY` on the Vercel project (optionally `AISLE_
 npm install
 npm run dev     # http://localhost:5173
 npm run build   # static build in dist/
-npm test        # 125 tests across 15 files (Vitest + Testing Library)
+npm test        # 146 tests across 16 files (Vitest + Testing Library)
 ```
 
 Vite + React 19 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. Deploys as a static site plus one optional serverless function for the built-in agent (this repo auto-deploys to Vercel on push).
@@ -198,6 +199,7 @@ api/agent.ts             serverless step function for the built-in agent (holds 
   store.ts               single Zustand store: chart state, undo/redo, activity feed
   solver.ts              the seating solver (full + minimal-repair modes)
   constraints.ts         rule evaluation, violations, drama score
+  presets.ts             wedding rule presets + suggestions, shared by sidebar and agent
   geometry.ts            real-feet room math, table/amenity footprints, zone bands
   actions.ts             shared human/agent actions, so both paths are one path
   agentCursor.ts         turns each mutation's diff into cursor choreography
