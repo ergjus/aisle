@@ -46,10 +46,19 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   // A shared chart prints under its own title, and composing it must not
   // overwrite the viewer's saved choices for their own chart.
   const sharedTitle = useStore((state) => (state.viewMode === 'shared' ? state.sharedView?.title ?? '' : null))
-  const initialOptions = (): ExportOptions =>
-    sharedTitle === null
-      ? loadExportOptions()
-      : { ...DEFAULT_EXPORT_OPTIONS, paper: loadExportOptions().paper, eventTitle: sharedTitle }
+  // The couple's own chart prints under the wedding as the home screen names
+  // it, unless the composer was given its own wording.
+  const event = useStore((state) => state.event)
+  const initialOptions = (): ExportOptions => {
+    if (sharedTitle !== null) return { ...DEFAULT_EXPORT_OPTIONS, paper: loadExportOptions().paper, eventTitle: sharedTitle }
+    const saved = loadExportOptions()
+    return {
+      ...saved,
+      eventTitle: saved.eventTitle || event.title,
+      eventDate: saved.eventDate || event.date,
+      venueName: saved.venueName || event.venueName,
+    }
+  }
   const [options, setOptionsState] = useState(initialOptions)
   const setOptions = (next: ExportOptions) => {
     setOptionsState(next)

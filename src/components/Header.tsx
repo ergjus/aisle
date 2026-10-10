@@ -35,6 +35,10 @@ export function Header({ onSampleRoom }: { onSampleRoom: () => void }) {
       undo: state.undo,
       undoStack: state.undoStack,
       shared: state.viewMode === 'shared',
+      home: state.viewMode !== 'shared' && state.screen === 'home',
+      eventTitle: state.event.title,
+      openHome: state.openHome,
+      openChart: state.openChart,
     }
   }))
   const [showShortcuts, setShowShortcuts] = useState(false)
@@ -105,33 +109,49 @@ export function Header({ onSampleRoom }: { onSampleRoom: () => void }) {
   const dateline = empty
     ? `An empty room · ${formatFeet(s.venueDimensions.widthFt)} × ${formatFeet(s.venueDimensions.lengthFt)}`
     : `${s.guestOrder.length} guests · ${s.tableOrder.length} table${s.tableOrder.length === 1 ? '' : 's'} · ${s.constraints.length} rule${s.constraints.length === 1 ? '' : 's'}`
+  const title = s.eventTitle.trim()
+
+  const wordmark = (
+    <h1 className="masthead-wordmark">
+      <span className="masthead-fleuron" aria-hidden="true">❦</span>
+      Aisle
+    </h1>
+  )
 
   return (
     <header className="masthead">
       <div className="flex min-w-0 items-center gap-4">
-        <h1 className="masthead-wordmark">
-          <span className="masthead-fleuron" aria-hidden="true">❦</span>
-          Aisle
-        </h1>
-        <div className="masthead-rule" aria-hidden="true" />
-        <div className="hidden min-w-0 flex-col leading-none lg:flex">
-          <span className="smallcaps text-[13px] text-ink-soft">On the chart</span>
-          <span className="figures mt-0.5 truncate text-[12px] text-ink-soft">{dateline}</span>
-        </div>
-        <div className="masthead-rule hidden lg:block" aria-hidden="true" />
-        <ChartStatus
-          empty={empty}
-          seated={seated}
-          attending={attending.length}
-          violations={violations}
-          onFix={s.shared ? undefined : () => seatEveryone('repair')}
-        />
+        {s.shared || s.home ? (
+          wordmark
+        ) : (
+          // From the floor plan, the wordmark is the way back home.
+          <button type="button" className="masthead-home" onClick={() => s.openHome()} title="Back to the home screen" aria-label="Home">
+            {wordmark}
+          </button>
+        )}
+        {s.home ? null : (
+          <>
+            <div className="masthead-rule" aria-hidden="true" />
+            <div className="hidden min-w-0 flex-col leading-none lg:flex">
+              <span className="smallcaps truncate text-[13px] text-ink-soft">{s.shared || !title ? 'On the chart' : title}</span>
+              <span className="figures mt-0.5 truncate text-[12px] text-ink-soft">{dateline}</span>
+            </div>
+            <div className="masthead-rule hidden lg:block" aria-hidden="true" />
+            <ChartStatus
+              empty={empty}
+              seated={seated}
+              attending={attending.length}
+              violations={violations}
+              onFix={s.shared ? undefined : () => seatEveryone('repair')}
+            />
+          </>
+        )}
       </div>
 
       <div className="min-w-2 flex-1" />
 
       <div className="flex items-center gap-2.5">
-        {!s.shared && (
+        {!s.shared && !s.home && (
           <>
             <Button
               data-tour="seat-everyone"

@@ -659,5 +659,14 @@ export default function OnboardingExperience({
   }, [sampleRoomRequest])
 
   if (!showFirstRun) return null
-  return <FirstRunDialog onSkipped={() => setShowFirstRun(false)} onRevealed={() => setShowFirstRun(false)} />
+  return (
+    <FirstRunDialog
+      onSkipped={() => setShowFirstRun(false)}
+      onRevealed={() => {
+        setShowFirstRun(false)
+        // The room was just built to be looked at: open the floor plan on it.
+        useStore.getState().openChart()
+      }}
+    />
+  )
 }

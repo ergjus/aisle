@@ -1691,7 +1691,7 @@ function exportTools(): WebTool[] {
           ? String(args.title)
           : store.viewMode === 'shared'
             ? store.sharedView?.title
-            : loadExportOptions().eventTitle
+            : store.event.title || loadExportOptions().eventTitle
         const seated = state.guestOrder.filter((id) => state.seating[id]).length
         const summary =
           `${state.guestOrder.length} guest${state.guestOrder.length === 1 ? '' : 's'} (${seated} seated), ` +

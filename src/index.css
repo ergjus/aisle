@@ -675,3 +675,319 @@
   }
 
 }
+
+/* ---- the home screen ------------------------------------------------------ */
+
+@layer components {
+  .home {
+    min-height: 0;
+    overflow-y: auto;
+    background:
+      radial-gradient(ellipse at top, color-mix(in srgb, var(--color-parchment) 60%, transparent), transparent 60%),
+      var(--color-ivory);
+  }
+
+  .home-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    width: min(880px, 100%);
+    margin: 0 auto;
+    padding: 48px 24px 64px;
+  }
+
+  .home-kicker {
+    font-size: 13px;
+    color: var(--color-ink-faint);
+  }
+
+  /* The wedding's name, date and venue are written straight onto the page:
+     fields with no box, set like the head of a printed program. */
+  .home-event {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .home-field {
+    display: block;
+    min-width: 0;
+  }
+
+  .home-field input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    padding: 2px 0;
+    color: var(--color-ink);
+    font: inherit;
+    outline: none;
+    transition: border-color 120ms ease;
+  }
+
+  .home-field input::placeholder {
+    color: color-mix(in srgb, var(--color-ink-faint) 70%, transparent);
+  }
+
+  .home-field input:hover,
+  .home-field input:focus {
+    border-bottom-color: var(--color-hairline);
+  }
+
+  .home-field input:focus {
+    border-bottom-color: var(--color-gold);
+  }
+
+  .home-field-title input {
+    font-family: var(--font-serif);
+    font-size: clamp(34px, 5vw, 46px);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: 0.005em;
+  }
+
+  .home-event-line {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 15px;
+    color: var(--color-ink-soft);
+  }
+
+  .home-event-line .home-field { flex: 0 1 auto; max-width: 100%; }
+  .home-event-line .home-field input { color: var(--color-ink-soft); }
+  .home-event-sep { color: var(--color-ink-faint); }
+
+  /* How far along the seating is: one headline, one next step, a bar, a door. */
+  .home-progress {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'text open' 'bar bar';
+    gap: 14px 24px;
+    align-items: center;
+    border: 1px solid var(--color-hairline);
+    border-radius: 14px;
+    background: var(--color-card);
+    padding: 20px 22px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 10px 24px -20px rgba(20, 31, 24, 0.5);
+  }
+
+  .home-progress-text { grid-area: text; min-width: 0; }
+  .home-progress-open { grid-area: open; }
+  .home-progress-bar { grid-area: bar; }
+
+  .home-progress-headline {
+    font-family: var(--font-serif);
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--color-ink);
+  }
+
+  .home-progress-headline .figures { font-size: 24px; }
+
+  .home-progress-next {
+    margin-top: 4px;
+    font-size: 14px;
+    color: var(--color-ink-soft);
+  }
+
+  .home-progress-broken .home-progress-next { color: var(--color-brick); }
+  .home-progress-complete .home-progress-next { color: var(--color-sage); }
+
+  .home-progress-bar {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: var(--color-parchment);
+  }
+
+  .home-progress-bar span {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--color-gold);
+    transition: width 300ms ease;
+  }
+
+  .home-progress-complete .home-progress-bar span { background: var(--color-ok); }
+  .home-progress-broken .home-progress-bar span { background: var(--color-brick); }
+
+  /* Guests, tables, rules: a figure each, each a door into its sidebar section. */
+  .home-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .home-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    border: 1px solid var(--color-hairline);
+    border-radius: 12px;
+    background: var(--color-card);
+    padding: 16px 18px;
+    text-align: left;
+    transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+  }
+
+  .home-tile:hover {
+    border-color: var(--color-gold);
+    box-shadow: 0 10px 24px -18px rgba(20, 31, 24, 0.6);
+    transform: translateY(-1px);
+  }
+
+  .home-tile:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  .home-tile-label { font-size: 13px; color: var(--color-ink-faint); }
+
+  .home-tile-figure {
+    font-size: 30px;
+    font-weight: 500;
+    line-height: 1.1;
+    color: var(--color-ink);
+  }
+
+  .home-tile-detail { font-size: 13px; color: var(--color-ink-soft); }
+  .home-tile-broken .home-tile-detail { color: var(--color-brick); }
+  .home-tile-complete .home-tile-detail { color: var(--color-sage); }
+
+  /* An empty chart: three ways to begin. */
+  .home-start-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .home-start {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    border: 1px solid var(--color-hairline);
+    border-radius: 14px;
+    background: var(--color-card);
+    padding: 20px;
+    text-align: left;
+    transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+  }
+
+  .home-start:hover {
+    border-color: var(--color-gold);
+    box-shadow: 0 10px 24px -18px rgba(20, 31, 24, 0.6);
+    transform: translateY(-1px);
+  }
+
+  .home-start:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  .home-start-icon {
+    width: 22px;
+    height: 22px;
+    color: var(--color-gold-ink);
+  }
+
+  .home-start-title {
+    font-family: var(--font-serif);
+    font-size: 21px;
+    font-weight: 600;
+    line-height: 1.15;
+    color: var(--color-ink);
+  }
+
+  .home-start-text {
+    flex: 1;
+    font-size: 13.5px;
+    line-height: 1.45;
+    color: var(--color-ink-soft);
+  }
+
+  .home-start-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-gold-ink);
+  }
+
+  /* The last few things that happened, so a return visit starts in context. */
+  .home-recent-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+
+  .home-link {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font-size: 13px;
+    color: var(--color-gold-ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .home-recent ul {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .home-recent li {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: baseline;
+    border-bottom: 1px solid var(--color-hairline);
+    padding: 9px 0;
+    font-size: 13.5px;
+  }
+
+  .home-recent-who {
+    font-family: var(--font-serif);
+    font-variant-caps: small-caps;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--color-ink-faint);
+  }
+
+  .home-recent-agent { color: var(--color-gold-ink); }
+  .home-recent-text { min-width: 0; color: var(--color-ink); }
+  .home-recent-when { font-size: 12px; color: var(--color-ink-faint); white-space: nowrap; }
+
+  /* The masthead's wordmark is the way home from the floor plan. */
+  .masthead-home {
+    display: inline-flex;
+    align-items: baseline;
+    border: 0;
+    background: transparent;
+    padding: 0;
+    border-radius: 4px;
+  }
+
+  .masthead-home:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 4px;
+  }
+
+  @media (max-width: 720px) {
+    .home-inner { gap: 22px; padding: 28px 16px 48px; }
+    .home-tiles, .home-start-grid { grid-template-columns: 1fr; }
+    .home-progress { grid-template-areas: 'text text' 'bar bar' 'open open'; }
+    .home-progress-open { justify-self: start; }
+    .home-event-line { flex-wrap: wrap; }
+  }
+}

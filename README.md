@@ -36,7 +36,7 @@ No API keys, no server, no bespoke integration. Open the page in an agent-enable
 ## Try it in 90 seconds
 
 1. Open the [live app](https://aisle-three.vercel.app/). The built-in agent sits in the left panel; an agent-enabled browser can also drive the page directly (see [Testing with an agent](#testing-with-an-agent)).
-2. First visit? A short questionnaire asks about your venue and builds a room in its shape, seated with the sample wedding — 72 guests, 10 tables, and 17 rules including a divorce, an ex-couple, a neighborly fence war, and a grandmother who hates loud speakers. Skip it and the room starts empty; **Load the sample wedding** is in the ⋯ menu.
+2. You land on the home screen: name the wedding, then pick **See an example** to load the sample wedding — 72 guests, 10 tables, and 17 rules including a divorce, an ex-couple, a neighborly fence war, and a grandmother who hates loud speakers. (**Add your guest list** and **Set up the room** start from your own.)
 3. Ask your agent: *"Seat everyone. Keep the exes apart and put Grandma far from the band."*
 4. Watch the room arrange itself, with a plain-language explanation of every trade-off.
 5. Drag Sam Whitfield onto Jordan's table. Watch the violation line appear and the masthead turn to *1 rule broken · Fix*.
@@ -134,9 +134,13 @@ Aisle is set like wedding stationery laid over an architect's sheet, not like a 
 
 Motion is spent where it means something: the agent cursor carries chips and speaks in a real speech bubble; a chair pulls out when your chip hovers over it; a dropped chip settles with a soft ring; and petals fall exactly once, when the chart is finalized. Reduced-motion users get none of it and lose nothing.
 
-## The first visit
+## The home screen
 
-First-time visitors get a short questionnaire instead of an empty room: pick a venue shape (**Ballroom**, **Garden / Tent**, **Restaurant / Private room**, or **Custom**), confirm the room's real dimensions in feet, choose how many tables and of what shape, and tick the amenities the venue has. Aisle lays out the room to scale and seats it with the sample wedding, so the first thing you see is a working chart to talk to the agent about. **Set up a sample room…** in the ⋯ menu replays it any time.
+Every visit starts on the home screen: the wedding's name, date and venue, written straight onto the page; how the seating stands (*41 of 70 seated · 2 rules broken*) with the next thing it needs; and a tile each for guests, tables and rules that opens the floor plan on that section. An empty chart offers three ways to begin — add a guest list, set up the room, or load the sample wedding. The wordmark in the masthead is the way back from the floor plan, and the name on the home screen heads the printed document and the share link.
+
+## A sample room
+
+**Set up a sample room…** in the ⋯ menu asks a short questionnaire instead of starting from an empty room: pick a venue shape (**Ballroom**, **Garden / Tent**, **Restaurant / Private room**, or **Custom**), confirm the room's real dimensions in feet, choose how many tables and of what shape, and tick the amenities the venue has. Aisle lays out the room to scale and seats it with the sample wedding, so you have a working chart to talk to the agent about before your own list is ready.
 
 ## The deliverable: a printed seating document
 
