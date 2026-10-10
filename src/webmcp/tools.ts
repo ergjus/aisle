@@ -1,4 +1,4 @@
-import { getCore, occupantsOf, uid, useStore } from '../store'
+import { getCore, occupantsOf, uid, useStore, type ViewMode } from '../store'
 import type { AisleState, Guest, RSVP, Table, VenueFeatureId, ZoneId } from '../types'
 import { ROOM, WALL_MARGIN, containDelta, featureMinSize, feetSize, formatFeet, layoutConflicts, outOfRoomItems, roomRect, stageUnitsPerFoot, tableBounds, zoneBands } from '../geometry'
 import { computeViolations, constraintStatus, constraintText, dramaLabel, dramaScore, findDuplicateRule } from '../constraints'
@@ -12,6 +12,7 @@ import { buildDocModel, chartCSV, type ExportSections, type PaperSize } from '..
 import { loadExportOptions, saveExportOptions } from '../export/options'
 import { syncTools, webmcpAvailable, type WebTool } from './adapter'
 import { choreograph, endAgentSession, glance, touchAgentSession } from '../agentCursor'
+import { LONG_LINK_CHARS, buildShareUrl } from '../share/codec'
 
 // ---- result helpers --------------------------------------------------------
 
@@ -333,6 +334,7 @@ const READ_GLANCES: Record<string, string> = {
   list_unseated: 'Counting empty seats…',
   list_violations: 'Checking for drama…',
   get_chart_document: 'Compiling the seating list…',
+  get_share_link: 'Folding the chart into a link…',
   explain_seating: 'Consulting the seating logic…',
   get_recent_activity: 'Catching up on what changed…',
 }
@@ -1671,6 +1673,47 @@ function exportTools(): WebTool[] {
       },
       { readOnly: true },
     ),
+    makeTool(
+      'get_share_link',
+      'Build a read-only link to this seating chart that the human can send to family, a client, the venue, or the caterer. Whoever opens it sees the floor plan, tables, seats, and rules in a view-only mode with a "find your seat" search and Print — their own chart is never touched, and they can choose to make an editable copy. Nothing is uploaded: the whole chart is compressed into the link itself (after the #), so it is a snapshot — later edits need a fresh link. Guest notes and rule notes can be private, so they are left out unless include_notes is true. Hand the link to the human; do not shorten or alter it.',
+      obj({
+        include_notes: { type: 'boolean', description: 'Include guest notes and rule notes (default false — they may be private)' },
+        title: str('Title shown on the shared chart, e.g. "June & Ravi" (defaults to the printed document title, if one is set)'),
+      }),
+      (args) => {
+        const state = getCore()
+        if (state.guestOrder.length === 0 && state.tableOrder.length === 0) {
+          return fail('There is nothing to share yet — add guests or tables first.')
+        }
+        const includeNotes = args.include_notes === true
+        const store = useStore.getState()
+        const title = args.title !== undefined
+          ? String(args.title)
+          : store.viewMode === 'shared'
+            ? store.sharedView?.title
+            : loadExportOptions().eventTitle
+        const seated = state.guestOrder.filter((id) => state.seating[id]).length
+        const summary =
+          `${state.guestOrder.length} guest${state.guestOrder.length === 1 ? '' : 's'} (${seated} seated), ` +
+          `${state.tableOrder.length} table${state.tableOrder.length === 1 ? '' : 's'}, ${state.constraints.length} rule${state.constraints.length === 1 ? '' : 's'}`
+        return {
+          text: `Read-only link to the seating chart${title?.trim() ? ` “${title.trim()}”` : ''} — ${summary}; guest notes ${includeNotes ? 'included' : 'left out'}`,
+          finish: async () => {
+            try {
+              const url = await buildShareUrl(state, { includeNotes, title })
+              let tail = `:\n\n${url}\n\n${url.length.toLocaleString('en-US')} characters. It is a snapshot of the chart right now; after further edits, build a new link.`
+              if (url.length > LONG_LINK_CHARS) {
+                tail += ` ⚠ This link is very long — some messengers and email clients truncate links past about ${LONG_LINK_CHARS.toLocaleString('en-US')} characters, so suggest sending it somewhere that keeps long links intact (or printing via export_chart instead).`
+              }
+              return tail
+            } catch {
+              return '. The link could not be built in this browser — offer the printed document (export_chart) instead.'
+            }
+          },
+        }
+      },
+      { readOnly: true },
+    ),
   ]
 }
 
@@ -1720,7 +1763,7 @@ function finalizeTools(): WebTool[] {
 
 // ---- dynamic registration --------------------------------------------------
 
-function toolFlags(state: AisleState) {
+function toolFlags(state: AisleState, viewMode: ViewMode = useStore.getState().viewMode) {
   const attending = state.guestOrder.filter((id) => state.guests[id].rsvp !== 'no')
   const allSeated = attending.length > 0 && attending.every((id) => state.seating[id])
   const canFinalize = allSeated && computeViolations(state).length === 0
@@ -1728,21 +1771,27 @@ function toolFlags(state: AisleState) {
     hasTables: state.tableOrder.length > 0,
     hasContent: state.guestOrder.length > 0 || state.tableOrder.length > 0,
     canFinalize,
+    /** A shared chart is on screen: only tools that change nothing may register. */
+    viewOnly: viewMode === 'shared',
   }
 }
 
 function toolSignature(flags: ReturnType<typeof toolFlags>): string {
-  return `${flags.hasTables}|${flags.hasContent}|${flags.canFinalize}`
+  return `${flags.hasTables}|${flags.hasContent}|${flags.canFinalize}|${flags.viewOnly}`
 }
+
+const isReadOnlyTool = (tool: WebTool) => tool.annotations?.readOnlyHint === true
 
 export function currentTools(): WebTool[] {
   const flags = toolFlags(getCore())
-  return [
+  const tools = [
     ...baseTools(),
     ...(flags.hasTables ? seatingTools() : []),
     ...(flags.hasContent ? exportTools() : []),
     ...(flags.canFinalize ? finalizeTools() : []),
   ]
+  // Someone viewing a share link can let an agent read the chart, never edit it.
+  return flags.viewOnly ? tools.filter(isReadOnlyTool) : tools
 }
 
 // ---- catalog for the in-app toolbox page ------------------------------------
@@ -1761,6 +1810,8 @@ export interface CatalogEntry {
   /** What has to be true of the chart for this tool to be registered. */
   requires: 'always' | 'tables' | 'content' | 'perfect'
   available: boolean
+  /** Held back only because a view-only share link is on screen. */
+  viewOnlyLocked: boolean
 }
 
 /**
@@ -1770,7 +1821,8 @@ export interface CatalogEntry {
  */
 export function toolCatalog(): CatalogEntry[] {
   const flags = toolFlags(getCore())
-  const entry = (tool: WebTool, requires: CatalogEntry['requires'], available: boolean): CatalogEntry => {
+  const entry = (tool: WebTool, requires: CatalogEntry['requires'], gateOpen: boolean): CatalogEntry => {
+    const viewOnlyLocked = flags.viewOnly && !isReadOnlyTool(tool)
     const schema = tool.inputSchema as {
       properties?: Record<string, { description?: string; enum?: unknown[] }>
       required?: string[]
@@ -1784,9 +1836,10 @@ export function toolCatalog(): CatalogEntry[] {
         description: [p.description, p.enum ? `One of: ${p.enum.join(', ')}` : null].filter(Boolean).join('. '),
         required: requiredNames.has(name),
       })),
-      readOnly: tool.annotations?.readOnlyHint === true,
+      readOnly: isReadOnlyTool(tool),
       requires,
-      available,
+      available: gateOpen && !viewOnlyLocked,
+      viewOnlyLocked,
     }
   }
   return [
@@ -1834,9 +1887,10 @@ export function initWebMCP(): void {
       s.tables === previous.tables &&
       s.constraints === previous.constraints &&
       s.seating === previous.seating &&
-      s.venue === previous.venue
+      s.venue === previous.venue &&
+      s.viewMode === previous.viewMode
     ) return
-    const flags = toolFlags(s)
+    const flags = toolFlags(s, s.viewMode)
     const sig = toolSignature(flags)
     if (sig !== lastSig) {
       lastSig = sig

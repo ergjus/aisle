@@ -7,6 +7,7 @@ import { computeViolations } from '../constraints'
 import { formatFeet } from '../geometry'
 import { chartMarkdown, downloadText } from '../utils'
 import {
+  DEFAULT_EXPORT_OPTIONS,
   PAGE_PX,
   availableSections,
   buildDocModel,
@@ -42,16 +43,23 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   const core = useStore(useShallow(selectCore))
   const exportRequest = useStore((state) => state.exportRequest)
   const logActivity = useStore((state) => state.logActivity)
-  const [options, setOptionsState] = useState(loadExportOptions)
+  // A shared chart prints under its own title, and composing it must not
+  // overwrite the viewer's saved choices for their own chart.
+  const sharedTitle = useStore((state) => (state.viewMode === 'shared' ? state.sharedView?.title ?? '' : null))
+  const initialOptions = (): ExportOptions =>
+    sharedTitle === null
+      ? loadExportOptions()
+      : { ...DEFAULT_EXPORT_OPTIONS, paper: loadExportOptions().paper, eventTitle: sharedTitle }
+  const [options, setOptionsState] = useState(initialOptions)
   const setOptions = (next: ExportOptions) => {
     setOptionsState(next)
-    saveExportOptions(next)
+    if (sharedTitle === null) saveExportOptions(next)
   }
 
   // The agent's export_chart tool writes options then bumps exportRequest —
   // reload so an already-open dialog reflects what the agent just composed.
   useEffect(() => {
-    setOptionsState(loadExportOptions())
+    setOptionsState(initialOptions())
   }, [exportRequest])
 
   const avail = useMemo(() => availableSections(core), [core])

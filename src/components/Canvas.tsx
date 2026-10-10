@@ -248,6 +248,8 @@ export function Canvas() {
     touched: state.touched,
     selection: state.selection,
     ruleHighlight: state.ruleHighlight,
+    foundGuest: state.foundGuest,
+    readOnly: state.viewMode === 'shared',
     undoStack: state.undoStack,
     proposal: state.proposal,
     question: state.question,
@@ -692,6 +694,8 @@ export function Canvas() {
     axis?: DragState['axis'],
   ) => {
     if (e.button !== 0) return
+    // A shared chart is view only: nothing on it picks up or moves.
+    if (s.readOnly) return
     e.stopPropagation()
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
     // Resizing the room while the camera auto-fits would re-frame every frame
@@ -724,7 +728,7 @@ export function Canvas() {
   }
 
   const beginRotate = (e: React.PointerEvent, kind: 'rotate-feature' | 'rotate-table', id: string) => {
-    if (e.button !== 0) return
+    if (e.button !== 0 || s.readOnly) return
     e.preventDefault()
     e.stopPropagation()
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
@@ -956,6 +960,7 @@ export function Canvas() {
   }
 
   const nudgeVenueSize = (e: React.KeyboardEvent, axis: 'x' | 'y' | 'both') => {
+    if (s.readOnly) return
     const step = e.shiftKey ? 5 : 1
     let dw = 0
     let dl = 0
@@ -974,12 +979,14 @@ export function Canvas() {
   }
 
   const empty = s.guestOrder.length === 0 && s.tableOrder.length === 0
+  /** The table of the guest a viewer looked up with "find your seat". */
+  const foundTable = s.foundGuest ? s.seating[s.foundGuest]?.tableId ?? null : null
 
   const onBackgroundTarget = (target: EventTarget) => target === wrapRef.current || target === stageRef.current
 
   return (
     <div
-      className={`canvas-wrap${panning ? ' panning' : ''}`}
+      className={`canvas-wrap${panning ? ' panning' : ''}${s.readOnly ? ' read-only' : ''}`}
       ref={wrapRef}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -1097,36 +1104,40 @@ export function Canvas() {
             {s.undoStack.length}
           </span>
         </div>
-        <button
-          type="button"
-          className="room-resize-handle edge-e"
-          style={{ left: room.x + room.w, top: room.y + room.h / 2, ['--handle-scale' as string]: 1 / scale }}
-          aria-label={`Resize the room's width. Drag, or use left and right arrows; currently ${formatFeet(s.venueDimensions.widthFt)} wide.`}
-          onPointerDown={(e) => beginDrag(e, 'resize-venue', 'venue', { x: 0, y: 0 }, 'x')}
-          onKeyDown={(e) => nudgeVenueSize(e, 'x')}
-        >
-          <span aria-hidden="true">↔</span>
-        </button>
-        <button
-          type="button"
-          className="room-resize-handle edge-s"
-          style={{ left: room.x + room.w / 2, top: room.y + room.h, ['--handle-scale' as string]: 1 / scale }}
-          aria-label={`Resize the room's length. Drag, or use up and down arrows; currently ${formatFeet(s.venueDimensions.lengthFt)} long.`}
-          onPointerDown={(e) => beginDrag(e, 'resize-venue', 'venue', { x: 0, y: 0 }, 'y')}
-          onKeyDown={(e) => nudgeVenueSize(e, 'y')}
-        >
-          <span aria-hidden="true">↕</span>
-        </button>
-        <button
-          type="button"
-          className="room-resize-handle corner"
-          style={{ left: room.x + room.w, top: room.y + room.h, ['--handle-scale' as string]: 1 / scale }}
-          aria-label={`Resize the room. Drag the corner, or use arrow keys; currently ${formatFeet(s.venueDimensions.widthFt)} by ${formatFeet(s.venueDimensions.lengthFt)}. Hold Shift for 5 foot steps.`}
-          onPointerDown={(e) => beginDrag(e, 'resize-venue', 'venue', { x: 0, y: 0 }, 'both')}
-          onKeyDown={(e) => nudgeVenueSize(e, 'both')}
-        >
-          <span aria-hidden="true">↘</span>
-        </button>
+        {!s.readOnly && (
+          <>
+            <button
+              type="button"
+              className="room-resize-handle edge-e"
+              style={{ left: room.x + room.w, top: room.y + room.h / 2, ['--handle-scale' as string]: 1 / scale }}
+              aria-label={`Resize the room's width. Drag, or use left and right arrows; currently ${formatFeet(s.venueDimensions.widthFt)} wide.`}
+              onPointerDown={(e) => beginDrag(e, 'resize-venue', 'venue', { x: 0, y: 0 }, 'x')}
+              onKeyDown={(e) => nudgeVenueSize(e, 'x')}
+            >
+              <span aria-hidden="true">↔</span>
+            </button>
+            <button
+              type="button"
+              className="room-resize-handle edge-s"
+              style={{ left: room.x + room.w / 2, top: room.y + room.h, ['--handle-scale' as string]: 1 / scale }}
+              aria-label={`Resize the room's length. Drag, or use up and down arrows; currently ${formatFeet(s.venueDimensions.lengthFt)} long.`}
+              onPointerDown={(e) => beginDrag(e, 'resize-venue', 'venue', { x: 0, y: 0 }, 'y')}
+              onKeyDown={(e) => nudgeVenueSize(e, 'y')}
+            >
+              <span aria-hidden="true">↕</span>
+            </button>
+            <button
+              type="button"
+              className="room-resize-handle corner"
+              style={{ left: room.x + room.w, top: room.y + room.h, ['--handle-scale' as string]: 1 / scale }}
+              aria-label={`Resize the room. Drag the corner, or use arrow keys; currently ${formatFeet(s.venueDimensions.widthFt)} by ${formatFeet(s.venueDimensions.lengthFt)}. Hold Shift for 5 foot steps.`}
+              onPointerDown={(e) => beginDrag(e, 'resize-venue', 'venue', { x: 0, y: 0 }, 'both')}
+              onKeyDown={(e) => nudgeVenueSize(e, 'both')}
+            >
+              <span aria-hidden="true">↘</span>
+            </button>
+          </>
+        )}
         {drag?.kind === 'resize-venue' && (
           <span className="room-size-readout" style={{ left: room.x + room.w - 14, top: room.y + room.h - 14, ['--handle-scale' as string]: 1 / scale }}>
             {formatFeet(s.venueDimensions.widthFt)} × {formatFeet(s.venueDimensions.lengthFt)}
@@ -1162,6 +1173,7 @@ export function Canvas() {
               onResizePointerDown={(e) => beginDrag(e, 'resize-feature', feature.id, { x: feature.w, y: feature.h })}
               onRotatePointerDown={(e) => beginRotate(e, 'rotate-feature', feature.id)}
               onKeyDown={(e) => {
+                if (s.readOnly) return
                 if (e.key.toLowerCase() === 'r') {
                   e.preventDefault()
                   s.updateVenueFeature(feature.id, { rotation: ((feature.rotation ?? 0) + 15) % 360 })
@@ -1183,6 +1195,7 @@ export function Canvas() {
                 })
               }}
               onResizeKeyDown={(e) => {
+                if (s.readOnly) return
                 const xDelta = unitsPerFoot.x * (e.shiftKey ? 0.5 : s.venueDimensions.snapFt || 1)
                 const yDelta = unitsPerFoot.y * (e.shiftKey ? 0.5 : s.venueDimensions.snapFt || 1)
                 const min = featureMinSize(feature.id, s.venueDimensions)
@@ -1199,7 +1212,7 @@ export function Canvas() {
                   h: Math.max(min.h, Math.min(room.y + room.h - feature.y - WALL_MARGIN, feature.h + dh)),
                 })
               }}
-              onRotate={() => s.updateVenueFeature(feature.id, { rotation: ((feature.rotation ?? 0) + 15) % 360 })}
+              onRotate={() => !s.readOnly && s.updateVenueFeature(feature.id, { rotation: ((feature.rotation ?? 0) + 15) % 360 })}
             />
           ) : null,
         )}
@@ -1236,7 +1249,7 @@ export function Canvas() {
               occupied={occSeats.size}
               badge={badge}
               touchedAt={touchedAt}
-              selected={s.selection?.kind === 'table' && s.selection.id === tid}
+              selected={(s.selection?.kind === 'table' && s.selection.id === tid) || foundTable === tid}
               layoutSelected={layoutSelection.some((entry) => layoutKey(entry.kind, entry.id) === layoutKey('table', tid))}
               warnings={warnings.get(layoutKey('table', tid)) ?? []}
               dropTarget={isTarget}
@@ -1244,8 +1257,9 @@ export function Canvas() {
               rotating={drag?.kind === 'rotate-table' && drag.id === tid}
               onPointerDown={(e) => beginDrag(e, 'table', tid, { x: t.x, y: t.y })}
               onRotatePointerDown={(e) => beginRotate(e, 'rotate-table', tid)}
-              onRotate={() => s.updateTable(tid, { rotation: ((t.rotation ?? 0) + 15) % 360 })}
+              onRotate={() => !s.readOnly && s.updateTable(tid, { rotation: ((t.rotation ?? 0) + 15) % 360 })}
               onKeyDown={(e) => {
+                if (s.readOnly) return
                 if (e.key.toLowerCase() === 'r') {
                   e.preventDefault()
                   s.updateTable(tid, { rotation: ((t.rotation ?? 0) + 15) % 360 })
@@ -1333,7 +1347,7 @@ export function Canvas() {
               dragging={false}
               selected={s.selection?.kind === 'guest' && s.selection.id === id}
               violated={violatedGuests.has(id)}
-              highlighted={s.ruleHighlight?.guestIds.includes(id)}
+              highlighted={s.ruleHighlight?.guestIds.includes(id) || s.foundGuest === id}
               pinned={Boolean(s.pinned[id])}
               landedAt={landed?.id === id ? landed.at : undefined}
               touchedAt={touchedAt}
@@ -1341,6 +1355,7 @@ export function Canvas() {
               whereLabel={`at ${s.tables[s.seating[id].tableId]?.name}`}
               onPointerDown={(e) => beginDrag(e, 'chip', id, positions[id])}
               onKeyDown={(e) => {
+                if (s.readOnly) return
                 if (e.key.toLowerCase() === 'p' && !e.metaKey && !e.ctrlKey) {
                   e.preventDefault()
                   const next = !s.pinned[id]
@@ -1365,7 +1380,7 @@ export function Canvas() {
 
         {s.finalized && <div className="ribbon">❦ &nbsp;Finalized — every guest seated, zero drama&nbsp; ❦</div>}
 
-        {violations.length > 0 && !s.finalized && (
+        {violations.length > 0 && !s.finalized && !s.readOnly && (
           <button
             data-tour="violation-banner"
             className="viol-banner"
@@ -1376,7 +1391,7 @@ export function Canvas() {
           </button>
         )}
 
-        {empty && (
+        {empty && !s.readOnly && (
           <div className="empty-room">
             <h3>The room is empty</h3>
             <p>
@@ -1472,12 +1487,13 @@ export function Canvas() {
                     dragging={false}
                     selected={s.selection?.kind === 'guest' && s.selection.id === id}
                     violated={violatedGuests.has(id)}
-                    highlighted={s.ruleHighlight?.guestIds.includes(id)}
+                    highlighted={s.ruleHighlight?.guestIds.includes(id) || s.foundGuest === id}
                     touchedAt={touchedAt}
                     staggerMs={escortDelay ?? (recentTouch ? (hashId(id) % 12) * 30 : 0)}
                     whereLabel="in the lounge"
                     onPointerDown={(e) => beginDrag(e, 'chip', id, toStage(e.clientX, e.clientY))}
                     onKeyDown={(e) => {
+                      if (s.readOnly) return
                       if (e.key !== 'Enter' && e.key !== ' ') return
                       e.preventDefault()
                       const r = (e.currentTarget as HTMLElement).getBoundingClientRect()

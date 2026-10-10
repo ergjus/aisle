@@ -1613,6 +1613,20 @@
   user-select: none;
 }
 
+/* A shared chart is view only: nothing picks up, so nothing offers a grip,
+   and the edit handles stay out of sight. The floor itself still pans. */
+.canvas-wrap.read-only .chip,
+.canvas-wrap.read-only .table,
+.canvas-wrap.read-only .venue-feature {
+  cursor: default;
+}
+
+.canvas-wrap.read-only .table-rotate-handle,
+.canvas-wrap.read-only .rotate-handle,
+.canvas-wrap.read-only .resize-handle {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chip,
   .venue-feature,

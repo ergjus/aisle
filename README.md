@@ -53,7 +53,7 @@ No login, no backend. State lives in your browser's localStorage.
 
 Aisle registers its tools through `document.modelContext.registerTool(tool, { signal })` — the current spec — and unregisters by aborting each tool's `AbortSignal`, with fallbacks for the deprecated `navigator.modelContext` alias, `unregisterTool()` on Chrome 146–150, and `provideContext({ tools })` on older drafts. Every tool has a `title`, a natural-language description, and a JSON Schema; read-only tools carry `readOnlyHint` (so agent surfaces can auto-approve them) and `untrustedContentHint` (their replies echo guest names and notes that people typed). Guests and tables are addressed by **fuzzy name** — agents say `"Grandma"` or `"Table 4"`, and ambiguity comes back as a helpful error listing candidates.
 
-**42 tools in total.** Click the **agent's place card** in the masthead to browse every one of them, live, with its current registration state — and a list of things to try saying.
+**43 tools in total.** Click the **agent's place card** in the masthead to browse every one of them, live, with its current registration state — and a list of things to try saying.
 
 ### Always registered (27)
 
@@ -91,12 +91,13 @@ Aisle registers its tools through `document.modelContext.registerTool(tool, { si
 | `update_table` / `remove_table` | Rename, resize, reshape, rotate, reposition in real feet, remove — the table glides to its new spot rather than jumping, and displaced guests go politely back to the lounge |
 | `clear_seating` / `list_unseated` / `list_violations` | Bulk reset and read tools for reasoning before acting |
 
-### Registered while the chart has anything in it (2)
+### Registered while the chart has anything in it (3)
 
 | Tool | What it does |
 | --- | --- |
 | `export_chart` | Composes the **printed seating document** — to-scale floor plan, table cards, A–Z directory, catering summary — and opens the export studio on screen pre-filled with the agent's masthead (title, date, venue), paper size, and section choices. The human reviews the live page preview and presses *Print · Save as PDF*: a real human-agent handoff, because the print button is the one thing an agent can't press |
 | `get_chart_document` | The same chart as portable data — a per-table Markdown list for pasting into an email, or CSV (one row per guest) for a spreadsheet |
+| `get_share_link` | A **view-only link** to the chart for the agent to hand over — to family, a client, the venue, the caterer. The whole chart is compressed into the link's `#fragment`, so nothing is uploaded; guest and rule notes stay out unless `include_notes` is set. Optional `title` |
 
 ### Registered only while the chart is perfect (1)
 
@@ -105,6 +106,8 @@ Aisle registers its tools through `document.modelContext.registerTool(tool, { si
 | `finalize_chart` | Exists **only** when every attending guest is seated and zero rules are violated. Locks the chart and returns a formatted per-table list with dietary summary. Drag someone into trouble and the tool unregisters itself |
 
 That last one is the dynamic-registration story in miniature: the *toolset itself* tells the agent what state the app is in.
+
+On a **shared, view-only chart** (see [Share links](#share-links-view-only)), only the read-only tools register — an agent in the viewer's browser can read the chart, explain a seat, or hand the link on, but every tool that would change the chart stays unregistered.
 
 ## Human controls stay first-class
 
@@ -120,6 +123,7 @@ Everything the agent can do, you can do by hand on the same state — and everyt
 - **Rule on proposals** — when the agent uses `propose_arrangement`, the room rearranges live under a gold **Keep / Revert** banner and the agent literally waits for your click. Reverting glides everyone back; pressing ⌘Z counts as a revert; simply continuing to work adopts the proposal.
 - **Answer its questions** — `ask_human` puts a card on the chart with the agent's options as buttons (and a box for your own words). Pick one and its tool call continues; skip it and the agent is told the decision is its own.
 - Violated rules draw animated dashed lines between the offending guests, badge the table, and feed the **drama meter** (*Serene → Simmering → Full telenovela*); a legend on the chart decodes the group colors.
+- **Share a view-only link** — *Share link…* in the masthead builds a link to the chart (with a Copy button, its length, and a private-notes toggle) for family, a client, the venue, or the caterer.
 - Actions stream into a shared activity feed — the agent's entries in gold, yours labeled *You* — and everything the agent touches glows for a moment with a name tag, so bulk rearrangements stay legible.
 
 The chart is a real seating planner without any agent at all — with a visible hint inviting you to bring one.
@@ -146,6 +150,15 @@ The guide watches real state, not clicks, so you can wander off and do it your o
 
 The same composer is a tool: an agent calls `export_chart` with a title, date, venue, and section list, and the studio **opens on the human's screen already composed** — the human just reviews the preview and presses Print. Planning ends with a real artifact, made by both of you.
 
+## Share links (view only)
+
+**Share link…** in the masthead (or the agent's `get_share_link`) turns the chart into a link anyone can open — a couple sending it to family, a planner to a client, anyone to the venue and caterer. There's no backend yet, so the link *is* the chart: guests, tables, seats, the venue and its dimensions, the house rules, and an optional title, packed into a compact versioned payload, deflated with the browser's own `CompressionStream`, and base64url-encoded into the URL fragment (`#share=v1.…`), which browsers never send to a server. The 72-guest sample wedding, fully seated, fits in about 1,850 characters.
+
+- **Private notes stay private.** Guest notes and rule notes ("recently divorced from Dario") are left out unless the sender ticks *Include private notes*.
+- **Opening a link never touches your own chart.** The shared chart is shown with persistence switched off — your saved chart isn't read over or written — under a *Shared seating chart · view only* banner. Dragging, editors, the sidebar, Seat everyone, and undo are gone; a **Find your seat** box spotlights a guest and their table and names their tablemates; **Print** still works.
+- **Make a copy to edit** saves the shared chart as your own (asking first if you already have one). **Back to my chart** returns to yours.
+- **Untrusted input, handled.** Links are size-capped before and during inflation, every field is type-checked and clamped, and a damaged, oversized, or other-version link gets a plain-language explanation instead of a crash. The share dialog warns when a link passes ~8,000 characters, where some messengers start truncating.
+
 ## Testing with an agent
 
 **Chrome (early preview):** WebMCP ships behind a flag from Chrome 146. Enable `chrome://flags/#enable-webmcp-for-testing`, restart, open the live URL, and use a WebMCP-capable agent surface (e.g. Gemini in Chrome, or an extension that consumes `navigator.modelContext`). The current API has moved between releases — Aisle detects `document.modelContext`, `navigator.modelContext`, and `window.modelContext`, prefers incremental `registerTool`/`unregisterTool`, and falls back to `provideContext({tools})` on older drafts.
@@ -168,6 +181,7 @@ aisle.call('ask_human', { question: 'Which side should the Pembertons sit on?', 
 aisle.call('point_at', { targets: ['Table 4', 'band'], note: 'This table is under the speakers.' })
 aisle.call('get_recent_activity', { who: 'human' })
 aisle.call('export_chart', { title: 'June & Ravi', paper: 'letter' })  // opens the print studio, composed
+aisle.call('get_share_link', { title: 'June & Ravi' })                 // a view-only link, notes left out
 aisle.call('wrap_up', { summary: 'Everyone is seated and both feuds are resolved.' })
 ```
 
@@ -181,12 +195,12 @@ To turn it on, set `ANTHROPIC_API_KEY` on the Vercel project (optionally `AISLE_
 npm install
 npm run dev     # http://localhost:5173
 npm run build   # static build in dist/
-npm test        # 146 tests across 16 files (Vitest + Testing Library)
+npm test        # 194 tests across 21 files (Vitest + Testing Library)
 ```
 
 Vite + React 19 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. Deploys as a static site plus one optional serverless function for the built-in agent (this repo auto-deploys to Vercel on push).
 
-The tests cover the parts that would be miserable to verify by hand: the tool layer and its dynamic registration, proposal and question lifecycles under concurrency, pinned seats through the solver and the agent's tools, the geometry and zone bands, spreadsheet parsing, export pagination, the onboarding challenge state machine, and the sidebar's interaction details.
+The tests cover the parts that would be miserable to verify by hand: the tool layer and its dynamic registration, proposal and question lifecycles under concurrency, pinned seats through the solver and the agent's tools, the geometry and zone bands, spreadsheet parsing, export pagination, share-link encoding and its defenses against damaged links, the read-only shared view, the onboarding challenge state machine, and the sidebar's interaction details.
 
 ## Where things live
 
@@ -204,10 +218,12 @@ api/agent.ts             serverless step function for the built-in agent (holds 
   actions.ts             shared human/agent actions, so both paths are one path
   agentCursor.ts         turns each mutation's diff into cursor choreography
   components/            Canvas, FloorArt, Sidebar, Header (masthead), AgentQuestion,
-                         Celebration, Editors, ExportDialog, ToolsPage, ShortcutsDialog
+                         Celebration, Editors, ExportDialog, ShareDialog, SharedViewBar,
+                         ToolsPage, ShortcutsDialog
   onboarding/            welcome questionnaire, personalized venue planner, challenge
   import/                .xlsx/.csv/.tsv reader (hand-rolled ZIP + XML, zero deps)
   export/                print document model, pagination, and the SVG floor plan
+  share/                 share-link codec (compact payload, deflate, base64url) and the read-only viewer
 ```
 
 ## How the interesting parts work
