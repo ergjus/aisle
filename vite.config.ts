@@ -45,7 +45,12 @@ export default defineConfig(({ mode }) => {
   // Hand the agent's server-side settings to the function without exposing
   // them to the client bundle (only VITE_-prefixed vars reach the browser).
   const env = loadEnv(mode, process.cwd(), '')
-  for (const key of ['ANTHROPIC_API_KEY', 'AISLE_AGENT_MODEL', 'AISLE_AGENT_EFFORT']) {
+  for (const key of [
+    'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_PROFILE', 'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_FEDERATION_RULE_ID', 'ANTHROPIC_ORGANIZATION_ID', 'ANTHROPIC_SERVICE_ACCOUNT_ID', 'ANTHROPIC_WORKSPACE_ID',
+    'ANTHROPIC_IDENTITY_TOKEN', 'ANTHROPIC_IDENTITY_TOKEN_FILE', 'VERCEL_OIDC_TOKEN',
+    'AISLE_AGENT_MODEL', 'AISLE_AGENT_EFFORT',
+  ]) {
     if (env[key] && !process.env[key]) process.env[key] = env[key]
   }
   return {

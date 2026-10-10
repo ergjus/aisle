@@ -187,7 +187,14 @@ aisle.call('wrap_up', { summary: 'Everyone is seated and both feuds are resolved
 
 **Any other browser: the built-in agent.** WebMCP is still rare, so Aisle also carries its own agent. When the deployment has an API key configured, a **Plan with the agent** button appears in the corner: you type in a small chat panel, and the same cursor works the same chart with the same tools. The loop runs in the page and calls the very tool objects a WebMCP agent would, so pins, undo, proposals and the activity feed all behave identically; a small serverless function (`api/agent.ts`) holds the key and the system prompt and takes one model step per request. The guest list never leaves the browser except as part of the conversation sent to the model.
 
-To turn it on, set `ANTHROPIC_API_KEY` on the Vercel project (optionally `AISLE_AGENT_MODEL` and `AISLE_AGENT_EFFORT`). Locally, put the same variables in `.env.local` (see `.env.example`) and `npm run dev` serves the function too. Without a key the button simply doesn't appear.
+To turn it on, give the function a credential; without one the button simply doesn't appear. `AISLE_AGENT_MODEL` and `AISLE_AGENT_EFFORT` are optional overrides.
+
+- **On Vercel, workload identity federation (recommended): no API key stored anywhere.** Vercel signs a short-lived OIDC token for each function invocation, and the function trades it for a short-lived Anthropic token.
+  1. In the Vercel project, turn on *Secure backend access with OIDC federation* (team issuer).
+  2. In the Anthropic Console, an org admin registers Vercel's issuer (`https://oidc.vercel.com/<team-slug>`), creates a service account, and adds a federation rule that matches this project's tokens (subject `owner:<team-slug>:project:aisle:environment:production`, audience `https://vercel.com/<team-slug>`).
+  3. Set `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and `ANTHROPIC_SERVICE_ACCOUNT_ID` on the Vercel project (none are secret; add `ANTHROPIC_WORKSPACE_ID` if the rule covers several workspaces).
+- **Or an API key:** `ANTHROPIC_API_KEY` on the Vercel project.
+- **Locally:** `npm run dev` serves the function too. Put a key in `.env.local` (see `.env.example`), or run `ant auth login` once and the SDK picks up that profile with no key file.
 
 ## Running locally
 
@@ -195,7 +202,7 @@ To turn it on, set `ANTHROPIC_API_KEY` on the Vercel project (optionally `AISLE_
 npm install
 npm run dev     # http://localhost:5173
 npm run build   # static build in dist/
-npm test        # 194 tests across 21 files (Vitest + Testing Library)
+npm test        # 196 tests across 21 files (Vitest + Testing Library)
 ```
 
 Vite + React 19 + TypeScript + Zustand, styled with Tailwind CSS 4 and shadcn/ui components (Base UI primitives) over a warm ivory/pine/gold token system. Deploys as a static site plus one optional serverless function for the built-in agent (this repo auto-deploys to Vercel on push).
