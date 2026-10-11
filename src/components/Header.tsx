@@ -10,10 +10,12 @@ import { DramaMeter } from './DramaMeter'
 import { HeaderMenu, type MenuEntry } from './HeaderMenu'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { signOut, useSession } from '@/auth/client'
 
 const ToolsPage = lazy(() => import('./ToolsPage').then((module) => ({ default: module.ToolsPage })))
 const ExportDialog = lazy(() => import('./ExportDialog').then((module) => ({ default: module.ExportDialog })))
 const ShortcutsDialog = lazy(() => import('./ShortcutsDialog').then((module) => ({ default: module.ShortcutsDialog })))
+const SignInDialog = lazy(() => import('./SignInDialog').then((module) => ({ default: module.SignInDialog })))
 
 /**
  * The masthead. Reads like the top of a printed program — the wordmark, a
@@ -39,6 +41,8 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
   }))
   const [showTools, setShowTools] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showSignIn, setShowSignIn] = useState(false)
+  const { data: session } = useSession()
   const empty = s.guestOrder.length === 0 && s.tableOrder.length === 0
   const attending = s.guestOrder.filter((id) => s.guests[id].rsvp !== 'no')
   const canArrange = attending.length > 0 && s.tableOrder.length > 0
@@ -96,6 +100,10 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
       : { label: 'Load the sample wedding', hint: '72 guests', onSelect: loadSample },
     { label: 'Welcome guide', onSelect: onWelcomeGuide },
     { label: 'Keyboard & gestures', hint: '?', onSelect: () => setShowShortcuts(true) },
+    'separator',
+    session
+      ? { label: 'Sign out', hint: session.user.email, onSelect: () => void signOut() }
+      : { label: 'Sign in', onSelect: () => setShowSignIn(true) },
     'separator',
     { label: 'Reset the chart…', onSelect: reset, danger: true, disabled: empty },
   ]
@@ -161,6 +169,7 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
         {showTools && <ToolsPage onClose={() => setShowTools(false)} />}
         {s.exportOpen && <ExportDialog onClose={() => s.setExportOpen(false)} />}
         {showShortcuts && <ShortcutsDialog open onOpenChange={setShowShortcuts} />}
+        {showSignIn && <SignInDialog open onOpenChange={setShowSignIn} />}
       </Suspense>
     </header>
   )
