@@ -1,15 +1,18 @@
-import { getCore, occupantsOf, uid, useStore } from '../store'
+import { getCore, occupantsOf, uid, useStore, type ViewMode } from '../store'
 import type { AisleState, Guest, RSVP, Table, VenueFeatureId, ZoneId } from '../types'
 import { ROOM, WALL_MARGIN, containDelta, featureMinSize, feetSize, formatFeet, layoutConflicts, outOfRoomItems, roomRect, stageUnitsPerFoot, tableBounds, zoneBands } from '../geometry'
 import { computeViolations, constraintStatus, constraintText, dramaLabel, dramaScore, findDuplicateRule } from '../constraints'
 import { autoArrange } from '../solver'
+import { RULE_PRESETS, planSummary, rulePreset, suggestRulePresets } from '../presets'
+import { applyRulePreset } from '../actions'
 import { SAMPLE } from '../sample'
 import { chartMarkdown } from '../utils'
-import { guestEntriesFromText } from '../import/spreadsheet'
+import { describeImport, guestImportFromText } from '../import/spreadsheet'
 import { buildDocModel, chartCSV, type ExportSections, type PaperSize } from '../export/model'
 import { loadExportOptions, saveExportOptions } from '../export/options'
 import { syncTools, webmcpAvailable, type WebTool } from './adapter'
 import { choreograph, endAgentSession, glance, touchAgentSession } from '../agentCursor'
+import { LONG_LINK_CHARS, buildShareUrl } from '../share/codec'
 
 // ---- result helpers --------------------------------------------------------
 
@@ -331,6 +334,7 @@ const READ_GLANCES: Record<string, string> = {
   list_unseated: 'Counting empty seats…',
   list_violations: 'Checking for drama…',
   get_chart_document: 'Compiling the seating list…',
+  get_share_link: 'Folding the chart into a link…',
   explain_seating: 'Consulting the seating logic…',
   get_recent_activity: 'Catching up on what changed…',
 }
@@ -845,7 +849,7 @@ function baseTools(): WebTool[] {
     ),
     makeTool(
       'import_guests',
-      'Bulk-import guests from pasted text. Rows copied out of a spreadsheet work as-is — CSV, TSV, or semicolon-separated, with or without a header row; a header (Name / Group or Side / RSVP / Dietary / Notes, in any order, and First + Last name as separate columns) is read and its columns mapped. So does one guest per line with fields separated by " — ", " | " or tabs: name, then group, dietary needs, RSVP (yes/no/pending) — e.g. "Nora Flynn — Childhood friends — vegetarian". A JSON array of {name, group, dietary, rsvp, notes} objects also works. Duplicate names are skipped. (To load an .xlsx file, ask the human to use "Import a Spreadsheet…" under Guests, or paste its rows here.)',
+      'Bulk-import guests from pasted text. Rows copied out of a spreadsheet work as-is — CSV, TSV, or semicolon-separated, with or without a header row; a header (Name / Group, Household or Side / RSVP / Meal or Dietary / Notes, in any order, and First + Last name as separate columns) is read and its columns mapped. Guest-list exports from Zola, The Knot and WeddingWire are recognised: partner, plus-one and "Guest 2" columns become guests in the same party, per-event RSVP columns are read with the reception/wedding preferred, and address, email, phone and gift columns are ignored. So does one guest per line with fields separated by " — ", " | " or tabs: name, then group, dietary needs, RSVP (yes/no/pending) — e.g. "Nora Flynn — Childhood friends — vegetarian". A JSON array of {name, group, dietary, rsvp, notes} objects also works. Duplicate names are skipped. (To load an .xlsx file, ask the human to use "Import a Spreadsheet…" under Guests, or paste its rows here.)',
       obj(
         {
           text: str('The pasted guest list'),
@@ -854,12 +858,12 @@ function baseTools(): WebTool[] {
         ['text'],
       ),
       (args) => {
-        const entries = guestEntriesFromText(String(args.text ?? ''), args.default_group ? String(args.default_group) : undefined)
-        if (entries.length === 0) return fail('Could not find any guest names in that text.')
-        const added = useStore.getState().importGuests(entries)
-        const skipped = entries.length - added.length
+        const sheet = guestImportFromText(String(args.text ?? ''), args.default_group ? String(args.default_group) : undefined)
+        if (sheet.entries.length === 0) return fail('Could not find any guest names in that text.')
+        const added = useStore.getState().importGuests(sheet.entries)
+        const skipped = sheet.entries.length - added.length
         return ok(
-          `Imported ${added.length} guest${added.length === 1 ? '' : 's'}${skipped ? ` (${skipped} skipped as duplicates or blank)` : ''}. They are waiting in the lounge.`,
+          `${describeImport(sheet)}. Imported ${added.length} guest${added.length === 1 ? '' : 's'}${skipped ? ` (${skipped} skipped as duplicates or blank)` : ''}. They are waiting in the lounge.`,
           added.map((g) => g.id),
           `Imported ${added.length} guest${added.length === 1 ? '' : 's'} into the lounge.`,
         )
@@ -1031,6 +1035,56 @@ function baseTools(): WebTool[] {
           `Rule added [${c.id}]: ${constraintText(getCore(), c)}.${status === 'violated' ? ' It is currently VIOLATED — auto_arrange(mode:"repair") can fix it.' : ''}`,
           [ra.hit.id],
           `New rule: ${constraintText(getCore(), c)}.`,
+        )
+      },
+    ),
+    makeTool(
+      'apply_rule_preset',
+      `Add the rules for a common wedding case in one step — the same presets the human has in the sidebar's House rules. ${RULE_PRESETS.map((p) => `${p.id}: ${p.blurb}`).join(' ')} Presets add ordinary rules (must_sit_together / must_sit_apart / far_from_band / near_dance_floor), skip any the chart already has, and land as one undoable step. Call without guests to get the guests the guest list suggests for that preset — nothing is applied until you name them.`,
+      obj(
+        {
+          preset: str('Which preset', { enum: RULE_PRESETS.map((p) => p.id) }),
+          guests: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Guest names (fuzzy) — two for divorced_parents_apart and plus_ones_together, one or more for away_from_band, two or more for kids_table and head_table',
+          },
+        },
+        ['preset'],
+      ),
+      (args) => {
+        const state = getCore()
+        const preset = rulePreset(String(args.preset ?? ''))
+        if (!preset) return fail(`Unknown preset. Use one of: ${RULE_PRESETS.map((p) => p.id).join(', ')}.`)
+        const queries = Array.isArray(args.guests) ? args.guests : args.guests ? [args.guests] : []
+        if (queries.length === 0) {
+          const hints = suggestRulePresets(state).filter((s) => s.preset === preset.id)
+          if (hints.length === 0) {
+            return ok(`Nothing applied. The guest list doesn't suggest anyone for ${preset.label.toLowerCase()} — name the guests in "guests".`)
+          }
+          return ok(
+            `Nothing applied yet. The guest list suggests:\n${hints
+              .map((s) => `• ${s.guestIds.map((id) => state.guests[id].name).join(', ')} — from ${s.reason}`)
+              .join('\n')}\nConfirm with the human if unsure, then call again with "guests".`,
+          )
+        }
+        const ids: string[] = []
+        for (const q of queries) {
+          const r = resolveGuest(state, q)
+          if ('err' in r) return fail(r.err)
+          ids.push(r.hit.id)
+        }
+        const { plan, added } = applyRulePreset(preset.id, ids)
+        if (plan.error) return fail(plan.error)
+        const warnings = plan.warnings.length > 0 ? `\n⚠ ${plan.warnings.join(' ')}` : ''
+        if (added.length === 0) return ok(`${planSummary(state, plan)}${warnings}`)
+        const after = getCore()
+        const broken = added.filter((c) => constraintStatus(after, c) === 'violated').length
+        const ruleIds = added.map((c) => c.id).join(', ')
+        return ok(
+          `${planSummary(state, plan)} [${ruleIds}]${broken > 0 ? ` ${broken} ${broken === 1 ? 'is' : 'are'} currently VIOLATED — auto_arrange(mode:"repair") can fix that.` : ''}${warnings}`,
+          ids,
+          planSummary(state, plan),
         )
       },
     ),
@@ -1619,6 +1673,47 @@ function exportTools(): WebTool[] {
       },
       { readOnly: true },
     ),
+    makeTool(
+      'get_share_link',
+      'Build a read-only link to this seating chart that the human can send to family, a client, the venue, or the caterer. Whoever opens it sees the floor plan, tables, seats, and rules in a view-only mode with a "find your seat" search and Print — their own chart is never touched, and they can choose to make an editable copy. Nothing is uploaded: the whole chart is compressed into the link itself (after the #), so it is a snapshot — later edits need a fresh link. Guest notes and rule notes can be private, so they are left out unless include_notes is true. Hand the link to the human; do not shorten or alter it.',
+      obj({
+        include_notes: { type: 'boolean', description: 'Include guest notes and rule notes (default false — they may be private)' },
+        title: str('Title shown on the shared chart, e.g. "June & Ravi" (defaults to the printed document title, if one is set)'),
+      }),
+      (args) => {
+        const state = getCore()
+        if (state.guestOrder.length === 0 && state.tableOrder.length === 0) {
+          return fail('There is nothing to share yet — add guests or tables first.')
+        }
+        const includeNotes = args.include_notes === true
+        const store = useStore.getState()
+        const title = args.title !== undefined
+          ? String(args.title)
+          : store.viewMode === 'shared'
+            ? store.sharedView?.title
+            : loadExportOptions().eventTitle
+        const seated = state.guestOrder.filter((id) => state.seating[id]).length
+        const summary =
+          `${state.guestOrder.length} guest${state.guestOrder.length === 1 ? '' : 's'} (${seated} seated), ` +
+          `${state.tableOrder.length} table${state.tableOrder.length === 1 ? '' : 's'}, ${state.constraints.length} rule${state.constraints.length === 1 ? '' : 's'}`
+        return {
+          text: `Read-only link to the seating chart${title?.trim() ? ` “${title.trim()}”` : ''} — ${summary}; guest notes ${includeNotes ? 'included' : 'left out'}`,
+          finish: async () => {
+            try {
+              const url = await buildShareUrl(state, { includeNotes, title })
+              let tail = `:\n\n${url}\n\n${url.length.toLocaleString('en-US')} characters. It is a snapshot of the chart right now; after further edits, build a new link.`
+              if (url.length > LONG_LINK_CHARS) {
+                tail += ` ⚠ This link is very long — some messengers and email clients truncate links past about ${LONG_LINK_CHARS.toLocaleString('en-US')} characters, so suggest sending it somewhere that keeps long links intact (or printing via export_chart instead).`
+              }
+              return tail
+            } catch {
+              return '. The link could not be built in this browser — offer the printed document (export_chart) instead.'
+            }
+          },
+        }
+      },
+      { readOnly: true },
+    ),
   ]
 }
 
@@ -1668,7 +1763,7 @@ function finalizeTools(): WebTool[] {
 
 // ---- dynamic registration --------------------------------------------------
 
-function toolFlags(state: AisleState) {
+function toolFlags(state: AisleState, viewMode: ViewMode = useStore.getState().viewMode) {
   const attending = state.guestOrder.filter((id) => state.guests[id].rsvp !== 'no')
   const allSeated = attending.length > 0 && attending.every((id) => state.seating[id])
   const canFinalize = allSeated && computeViolations(state).length === 0
@@ -1676,21 +1771,27 @@ function toolFlags(state: AisleState) {
     hasTables: state.tableOrder.length > 0,
     hasContent: state.guestOrder.length > 0 || state.tableOrder.length > 0,
     canFinalize,
+    /** A shared chart is on screen: only tools that change nothing may register. */
+    viewOnly: viewMode === 'shared',
   }
 }
 
 function toolSignature(flags: ReturnType<typeof toolFlags>): string {
-  return `${flags.hasTables}|${flags.hasContent}|${flags.canFinalize}`
+  return `${flags.hasTables}|${flags.hasContent}|${flags.canFinalize}|${flags.viewOnly}`
 }
+
+const isReadOnlyTool = (tool: WebTool) => tool.annotations?.readOnlyHint === true
 
 export function currentTools(): WebTool[] {
   const flags = toolFlags(getCore())
-  return [
+  const tools = [
     ...baseTools(),
     ...(flags.hasTables ? seatingTools() : []),
     ...(flags.hasContent ? exportTools() : []),
     ...(flags.canFinalize ? finalizeTools() : []),
   ]
+  // Someone viewing a share link can let an agent read the chart, never edit it.
+  return flags.viewOnly ? tools.filter(isReadOnlyTool) : tools
 }
 
 // ---- catalog for the in-app toolbox page ------------------------------------
@@ -1709,6 +1810,8 @@ export interface CatalogEntry {
   /** What has to be true of the chart for this tool to be registered. */
   requires: 'always' | 'tables' | 'content' | 'perfect'
   available: boolean
+  /** Held back only because a view-only share link is on screen. */
+  viewOnlyLocked: boolean
 }
 
 /**
@@ -1718,7 +1821,8 @@ export interface CatalogEntry {
  */
 export function toolCatalog(): CatalogEntry[] {
   const flags = toolFlags(getCore())
-  const entry = (tool: WebTool, requires: CatalogEntry['requires'], available: boolean): CatalogEntry => {
+  const entry = (tool: WebTool, requires: CatalogEntry['requires'], gateOpen: boolean): CatalogEntry => {
+    const viewOnlyLocked = flags.viewOnly && !isReadOnlyTool(tool)
     const schema = tool.inputSchema as {
       properties?: Record<string, { description?: string; enum?: unknown[] }>
       required?: string[]
@@ -1732,9 +1836,10 @@ export function toolCatalog(): CatalogEntry[] {
         description: [p.description, p.enum ? `One of: ${p.enum.join(', ')}` : null].filter(Boolean).join('. '),
         required: requiredNames.has(name),
       })),
-      readOnly: tool.annotations?.readOnlyHint === true,
+      readOnly: isReadOnlyTool(tool),
       requires,
-      available,
+      available: gateOpen && !viewOnlyLocked,
+      viewOnlyLocked,
     }
   }
   return [
@@ -1742,6 +1847,21 @@ export function toolCatalog(): CatalogEntry[] {
     ...seatingTools().map((t) => entry(t, 'tables', flags.hasTables)),
     ...exportTools().map((t) => entry(t, 'content', flags.hasContent)),
     ...finalizeTools().map((t) => entry(t, 'perfect', flags.canFinalize)),
+  ]
+}
+
+/**
+ * Every tool, gated or not, with what has to be true for it to exist. The
+ * hosted agent offers this whole set up front — its tool list has to stay
+ * identical for a conversation — and answers a call to a gated tool with
+ * what would unlock it, where a WebMCP agent would simply not see the tool.
+ */
+export function allToolDefinitions(): { tool: WebTool; requires: CatalogEntry['requires'] }[] {
+  return [
+    ...baseTools().map((tool) => ({ tool, requires: 'always' as const })),
+    ...seatingTools().map((tool) => ({ tool, requires: 'tables' as const })),
+    ...exportTools().map((tool) => ({ tool, requires: 'content' as const })),
+    ...finalizeTools().map((tool) => ({ tool, requires: 'perfect' as const })),
   ]
 }
 
@@ -1767,9 +1887,10 @@ export function initWebMCP(): void {
       s.tables === previous.tables &&
       s.constraints === previous.constraints &&
       s.seating === previous.seating &&
-      s.venue === previous.venue
+      s.venue === previous.venue &&
+      s.viewMode === previous.viewMode
     ) return
-    const flags = toolFlags(s)
+    const flags = toolFlags(s, s.viewMode)
     const sig = toolSignature(flags)
     if (sig !== lastSig) {
       lastSig = sig

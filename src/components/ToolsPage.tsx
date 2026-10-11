@@ -45,12 +45,12 @@ const GROUPS: { title: string; blurb: string; names: string[] }[] = [
   {
     title: 'House rules',
     blurb: 'Keep the couple together and the exes apart; the solver obeys.',
-    names: ['add_constraint', 'remove_constraint'],
+    names: ['add_constraint', 'apply_rule_preset', 'remove_constraint'],
   },
   {
     title: 'The deliverable',
-    blurb: 'The agent composes the printed seating document; you press Print.',
-    names: ['export_chart', 'get_chart_document', 'finalize_chart'],
+    blurb: 'The agent composes the printed seating document — you press Print — or hands you a view-only link to send.',
+    names: ['export_chart', 'get_chart_document', 'get_share_link', 'finalize_chart'],
   },
   {
     title: 'Demo',
@@ -69,6 +69,7 @@ const PROMPTS: { say: string; shows: string }[] = [
   { say: 'Keep Rosa exactly where I put her, then reseat the rest of the room.', shows: 'pin_guest, then auto_arrange around the pin' },
   { say: 'Show me which table is under the speakers.', shows: 'point_at' },
   { say: 'Prepare the printed seating document — title it June & Ravi.', shows: 'export_chart opens the print studio, composed' },
+  { say: 'Give me a link I can send the caterer.', shows: 'get_share_link — a view-only chart, notes left out' },
 ]
 
 const GATE_NOTES: Record<CatalogEntry['requires'], { locked: string; open: string } | null> = {
@@ -101,7 +102,9 @@ function ToolCard({ entry }: { entry: CatalogEntry }) {
           {entry.readOnly ? 'read-only' : 'changes the chart'}
         </span>
       </div>
-      {gate && (
+      {entry.viewOnlyLocked ? (
+        <p className="mt-1 text-[11px] font-semibold text-ink-faint italic">Off while viewing a shared chart — make a copy to edit</p>
+      ) : gate && (
         <p className={cn('mt-1 text-[11px] font-semibold', entry.available ? 'text-sage' : 'text-ink-faint italic')}>
           {entry.available ? gate.open : gate.locked}
         </p>

@@ -1613,6 +1613,20 @@
   user-select: none;
 }
 
+/* A shared chart is view only: nothing picks up, so nothing offers a grip,
+   and the edit handles stay out of sight. The floor itself still pans. */
+.canvas-wrap.read-only .chip,
+.canvas-wrap.read-only .table,
+.canvas-wrap.read-only .venue-feature {
+  cursor: default;
+}
+
+.canvas-wrap.read-only .table-rotate-handle,
+.canvas-wrap.read-only .rotate-handle,
+.canvas-wrap.read-only .resize-handle {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chip,
   .venue-feature,
@@ -1638,5 +1652,290 @@
   /* The choreographer already skips queuing under reduced motion; this is the belt to that suspender. */
   .agent-cursor {
     display: none;
+  }
+}
+
+/* ---- hosted agent chat ----------------------------------------------------
+   The agent for browsers without WebMCP: a note card pinned to the corner of
+   the floor plan, styled like the agent's question cards. */
+
+.agent-chat-launcher {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 70;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--color-pine-line);
+  border-radius: 999px;
+  background: var(--color-pine-900);
+  padding: 9px 16px;
+  color: var(--color-linen);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 12px 28px -14px rgba(4, 9, 6, 0.7);
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.agent-chat-launcher:hover {
+  background: var(--color-pine-800);
+  transform: translateY(-1px);
+}
+
+.agent-chat-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--color-gold);
+}
+
+.agent-chat {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 70;
+  display: flex;
+  width: min(360px, calc(100vw - 32px));
+  height: min(520px, calc(100vh - 120px));
+  flex-direction: column;
+  border: 1px solid rgba(140, 116, 51, 0.5);
+  border-top: 3px solid var(--color-gold);
+  background: var(--color-card);
+  color: var(--color-ink);
+  box-shadow: 0 18px 40px -12px rgba(4, 9, 6, 0.6), 0 1px 0 rgba(255, 255, 255, 0.4) inset;
+  animation: entry-in 240ms ease;
+}
+
+.agent-chat.docked {
+  position: static;
+  width: auto;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  border: 0;
+  border-right: 1px solid var(--color-hairline);
+  border-top: 3px solid var(--color-gold);
+  box-shadow: none;
+  animation: none;
+}
+
+/* The docked chat folded away: a rail mirroring the plan's, on the left. */
+.agent-chat-rail {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border-right: 1px solid var(--color-hairline);
+  border-top: 3px solid var(--color-gold);
+  background: var(--color-card);
+  padding: 4px 0 12px;
+}
+
+.agent-chat-rail-toggle {
+  display: flex;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-hairline);
+  border-radius: 6px;
+  color: var(--color-ink-soft);
+}
+
+.agent-chat-rail-toggle:hover {
+  border-color: var(--color-gold);
+  color: var(--color-ink);
+}
+
+.agent-chat-rail-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-ink-faint);
+}
+
+.agent-chat-rail-label .smallcaps {
+  writing-mode: vertical-rl;
+}
+
+.agent-chat-rail-label:hover {
+  color: var(--color-ink);
+}
+
+.agent-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-hairline);
+  padding: 8px 10px 8px 14px;
+}
+
+.agent-chat-title {
+  flex: 1;
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.agent-chat-link {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--color-gold-ink);
+}
+
+.agent-chat-link:hover {
+  text-decoration: underline;
+}
+
+.agent-chat-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--color-ink-soft);
+}
+
+.agent-chat-close:hover {
+  background: var(--color-parchment);
+}
+
+.agent-chat-log {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.agent-chat-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--color-ink-soft);
+}
+
+.agent-chat-starters {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-chat-starters button {
+  border: 1px solid var(--color-hairline);
+  border-radius: 4px;
+  background: var(--color-ivory);
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--color-ink);
+}
+
+.agent-chat-starters button:hover {
+  border-color: var(--color-gold);
+}
+
+.agent-chat-msg {
+  max-width: 92%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.agent-chat-user {
+  align-self: flex-end;
+  border-radius: 6px;
+  background: var(--color-pine-800);
+  padding: 6px 10px;
+  color: var(--color-linen);
+}
+
+.agent-chat-agent {
+  align-self: flex-start;
+}
+
+.agent-chat-tool {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-gold-ink);
+}
+
+.agent-chat-tool.failed {
+  color: var(--color-ink-faint);
+}
+
+.agent-chat-notice {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--color-ink-soft);
+}
+
+.agent-chat-notice.error {
+  color: var(--color-brick);
+}
+
+.agent-chat-working {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-faint);
+}
+
+.agent-chat-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  border-top: 1px solid var(--color-hairline);
+  padding: 8px 10px;
+}
+
+.agent-chat-form textarea {
+  min-width: 0;
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--color-input);
+  border-radius: 4px;
+  background: var(--color-ivory);
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+.agent-chat-form button {
+  border: 1px solid var(--color-pine-line);
+  border-radius: 4px;
+  background: var(--color-pine-800);
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-linen);
+}
+
+.agent-chat-form button:disabled {
+  opacity: 0.5;
+}
+
+.agent-chat-launcher:focus-visible,
+.agent-chat-rail button:focus-visible,
+.agent-chat button:focus-visible,
+.agent-chat-form textarea:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-chat {
+    animation: none;
   }
 }

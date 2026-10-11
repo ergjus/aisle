@@ -17,6 +17,7 @@ import type {
 } from './types'
 import { ROOM, WALL_MARGIN, containDelta, featureBounds, findFreeSpot, freshVenue, freshVenueDimensions, legacyFittedRoomRect, roomRect, stageUnitsPerFoot, tableBounds } from './geometry'
 import { planPersonalizedSample, type PersonalizedPlannerResult } from './onboarding/planner'
+import { launchedFromShareLink } from './share/hash'
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 9)
@@ -145,6 +146,22 @@ interface Checkpoint {
   at: number
 }
 
+/**
+ * A chart opened from a share link. While one is on screen the store holds
+ * the *shared* chart, persistence is suspended, and the interface is
+ * read-only — the viewer's own saved chart is never read over or written.
+ */
+export interface SharedView {
+  status: 'loading' | 'ready' | 'error'
+  title?: string
+  /** Whether the sender included guest/rule notes. */
+  hasNotes?: boolean
+  /** Human sentence explaining why the link couldn't be opened. */
+  error?: string
+}
+
+export type ViewMode = 'edit' | 'shared'
+
 export interface StoreState extends AisleState {
   agentConnected: boolean
   webmcpAvailable: boolean
@@ -172,6 +189,11 @@ export interface StoreState extends AisleState {
   question: HumanQuestion | null
   /** How the last question was answered — lets the waiting tool call read the reply. */
   lastAnswer: { id: string; answer: string; at: number } | null
+  /** 'shared' while a read-only share link is on screen; nothing is persisted then. */
+  viewMode: ViewMode
+  sharedView: SharedView | null
+  /** The guest a viewer looked up with "find your seat" — spotlit on the canvas. */
+  foundGuest: string | null
 
   snapshot: (label?: string) => void
   undo: () => boolean
@@ -199,6 +221,8 @@ export interface StoreState extends AisleState {
   updateVenueDimensions: (patch: Partial<VenueDimensions>, opts?: { snapshot?: boolean }) => void
 
   addConstraint: (c: DistributiveOmit<Constraint, 'id'> & { id?: string }) => Constraint
+  /** Several rules as one undoable step — what a rule preset adds. */
+  addConstraints: (cs: DistributiveOmit<Constraint, 'id'>[], label?: string) => Constraint[]
   removeConstraint: (id: string) => void
 
   seatGuest: (guestId: string, tableId: string, seat?: number) => { ok: boolean; seat?: number; error?: string }
@@ -238,6 +262,48 @@ export interface StoreState extends AisleState {
   setDraggingGuest: (id: string | null) => void
   setRuleHighlight: (h: RuleHighlight | null) => void
   setToast: (msg: string | null) => void
+
+  /** Switch to read-only viewing of a share link (state arrives later via showSharedChart). */
+  beginSharedView: () => void
+  /** Put a decoded shared chart on screen, read-only. */
+  showSharedChart: (core: AisleState, meta: { title?: string; hasNotes?: boolean }) => void
+  /** The share link couldn't be opened — explain why, still without touching the viewer's chart. */
+  failSharedView: (error: string) => void
+  /** Leave the shared view and go back to the viewer's own saved chart. */
+  leaveSharedView: () => void
+  /** "Make a copy to edit": the shared chart becomes the viewer's own, saved chart. */
+  adoptSharedChart: () => void
+  setFoundGuest: (id: string | null) => void
+}
+
+/** Whether the viewer has a chart of their own saved (one with anything in it). */
+export function hasSavedChart(): boolean {
+  try {
+    const raw = localStorage.getItem(CHART_STORAGE_KEY)
+    if (!raw) return false
+    const parsed = JSON.parse(raw)
+    return (Array.isArray(parsed?.guestOrder) && parsed.guestOrder.length > 0) ||
+      (Array.isArray(parsed?.tableOrder) && parsed.tableOrder.length > 0)
+  } catch {
+    return false
+  }
+}
+
+/** The transient session state a chart switch (shared ↔ own) should start fresh. */
+function freshSession() {
+  return {
+    undoStack: [] as UndoEntry[],
+    redoStack: [] as UndoEntry[],
+    selection: null,
+    draggingGuest: null,
+    ruleHighlight: null,
+    touched: {},
+    proposal: null,
+    question: null,
+    checkpoints: {},
+    exportOpen: false,
+    foundGuest: null,
+  }
 }
 
 function loadPersisted(): AisleState {
@@ -331,8 +397,12 @@ export function occupantsOf(state: AisleState, tableId: string): string[] {
     .sort((a, b) => state.seating[a].seat - state.seating[b].seat)
 }
 
+const startsShared = launchedFromShareLink()
+
 export const useStore = create<StoreState>((set, get) => ({
-  ...loadPersisted(),
+  // A share link shows someone else's chart: don't even read the viewer's own
+  // until they ask for it, so nothing of theirs can leak into the shared view.
+  ...(startsShared ? emptyCore() : loadPersisted()),
   agentConnected: false,
   webmcpAvailable: false,
   toolNames: [],
@@ -351,6 +421,9 @@ export const useStore = create<StoreState>((set, get) => ({
   checkpoints: {},
   question: null,
   lastAnswer: null,
+  viewMode: startsShared ? 'shared' : 'edit',
+  sharedView: startsShared ? { status: 'loading' } : null,
+  foundGuest: null,
 
   snapshot: (label = 'change') => {
     const s = get()
@@ -668,6 +741,14 @@ export const useStore = create<StoreState>((set, get) => ({
     return full
   },
 
+  addConstraints: (cs, label = 'add rules') => {
+    if (cs.length === 0) return []
+    get().snapshot(label)
+    const full = cs.map((c) => ({ ...c, id: uid() }) as Constraint)
+    set((s) => ({ constraints: [...s.constraints, ...full], finalized: false }))
+    return full
+  },
+
   removeConstraint: (id) => {
     get().snapshot('remove rule')
     set((s) => ({ constraints: s.constraints.filter((c) => c.id !== id), finalized: false }))
@@ -872,22 +953,81 @@ export const useStore = create<StoreState>((set, get) => ({
   setDraggingGuest: (id) => set({ draggingGuest: id }),
   setRuleHighlight: (h) => set({ ruleHighlight: h }),
   setToast: (msg) => set({ toast: msg }),
+
+  beginSharedView: () => {
+    if (get().viewMode === 'shared') {
+      set({ sharedView: { status: 'loading' } })
+      return
+    }
+    flushPendingSave()
+    set({ ...emptyCore(), ...freshSession(), viewMode: 'shared', sharedView: { status: 'loading' } })
+  },
+
+  showSharedChart: (core, meta) => {
+    flushPendingSave()
+    set({
+      ...structuredClone(core),
+      ...freshSession(),
+      viewMode: 'shared',
+      sharedView: { status: 'ready', title: meta.title, hasNotes: meta.hasNotes },
+    })
+  },
+
+  failSharedView: (error) => {
+    flushPendingSave()
+    set({ ...emptyCore(), ...freshSession(), viewMode: 'shared', sharedView: { status: 'error', error } })
+  },
+
+  leaveSharedView: () => {
+    if (get().viewMode !== 'shared') return
+    set({ ...loadPersisted(), ...freshSession(), viewMode: 'edit', sharedView: null })
+  },
+
+  adoptSharedChart: () => {
+    const s = get()
+    if (s.viewMode !== 'shared' || s.sharedView?.status !== 'ready') return
+    const core = selectCore(s)
+    set({ ...freshSession(), viewMode: 'edit', sharedView: null })
+    saveChartNow(core)
+    get().logActivity('copy', `Made an editable copy of the shared chart${s.sharedView.title ? ` “${s.sharedView.title}”` : ''}.`, 'you')
+  },
+
+  setFoundGuest: (id) => set({ foundGuest: id }),
 }))
 
 // ---- persistence -----------------------------------------------------------
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
+let pendingSave: AisleState | null = null
+
+function saveChartNow(core: AisleState): void {
+  try {
+    localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(core))
+  } catch {
+    // Storage full or unavailable; the session simply won't persist.
+  }
+}
+
+/** Writes a debounced save of the viewer's own chart right away, before the store switches to a shared one. */
+function flushPendingSave(): void {
+  clearTimeout(saveTimer)
+  if (pendingSave) saveChartNow(pendingSave)
+  pendingSave = null
+}
+
 useStore.subscribe((s, previous) => {
+  // A shared chart is someone else's: never persist it, and never let the
+  // switch into or out of one count as an edit to save.
+  if (s.viewMode !== 'edit' || previous.viewMode !== 'edit') return
   // Cursor animation, selection, activity, and other transient updates do not
   // belong in localStorage and should not keep postponing a real chart save.
   if (CORE_KEYS.every((key) => s[key] === previous[key])) return
   clearTimeout(saveTimer)
+  pendingSave = selectCore(s)
   saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(selectCore(s)))
-    } catch {
-      // Storage full or unavailable; the session simply won't persist.
-    }
+    const core = pendingSave
+    pendingSave = null
+    if (core && useStore.getState().viewMode === 'edit') saveChartNow(core)
   }, 300)
 })
 

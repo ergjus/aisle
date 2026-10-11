@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Printer } from 'lucide-react'
+import { Link2, Printer } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { selectCore, useStore } from '../store'
 import { computeViolations, dramaScore } from '../constraints'
@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 const ToolsPage = lazy(() => import('./ToolsPage').then((module) => ({ default: module.ToolsPage })))
 const ExportDialog = lazy(() => import('./ExportDialog').then((module) => ({ default: module.ExportDialog })))
 const ShortcutsDialog = lazy(() => import('./ShortcutsDialog').then((module) => ({ default: module.ShortcutsDialog })))
+const ShareDialog = lazy(() => import('./ShareDialog').then((module) => ({ default: module.ShareDialog })))
 
 /**
  * The masthead. Reads like the top of a printed program — the wordmark, a
@@ -35,10 +36,12 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
       setExportOpen: state.setExportOpen,
       undo: state.undo,
       undoStack: state.undoStack,
+      shared: state.viewMode === 'shared',
     }
   }))
   const [showTools, setShowTools] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showShare, setShowShare] = useState(false)
   const empty = s.guestOrder.length === 0 && s.tableOrder.length === 0
   const attending = s.guestOrder.filter((id) => s.guests[id].rsvp !== 'no')
   const canArrange = attending.length > 0 && s.tableOrder.length > 0
@@ -52,6 +55,8 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== '?' || e.metaKey || e.ctrlKey || e.altKey) return
+      // The sheet is about editing; a shared chart is view only.
+      if (useStore.getState().viewMode === 'shared') return
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement)?.isContentEditable) return
       e.preventDefault()
@@ -124,24 +129,28 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
 
       <div className="flex items-center gap-2.5">
         <AgentPlacecard onClick={() => setShowTools(true)} />
-        <Button
-          data-tour="seat-everyone"
-          size="sm"
-          className="h-8 px-3.5 text-[12.5px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_6px_14px_-8px_rgba(20,31,24,0.6)]"
-          onClick={() => seatEveryone('full')}
-          disabled={!canArrange}
-          title="Arrange the whole room automatically, honoring every rule — the same engine your agent uses"
-        >
-          Seat everyone
-        </Button>
-        <div className="masthead-icongroup" role="group" aria-label="History">
-          <button type="button" onClick={() => s.undo()} disabled={s.undoStack.length === 0} title="Undo (⌘Z)" aria-label="Undo">
-            <span aria-hidden="true">↶</span>
-          </button>
-          <button type="button" onClick={() => s.redo()} disabled={s.redoStack.length === 0} title="Redo (⇧⌘Z)" aria-label="Redo">
-            <span aria-hidden="true">↷</span>
-          </button>
-        </div>
+        {!s.shared && (
+          <>
+            <Button
+              data-tour="seat-everyone"
+              size="sm"
+              className="h-8 px-3.5 text-[12.5px] font-semibold shadow-[0_1px_0_rgba(255,255,255,0.08)_inset,0_6px_14px_-8px_rgba(20,31,24,0.6)]"
+              onClick={() => seatEveryone('full')}
+              disabled={!canArrange}
+              title="Arrange the whole room automatically, honoring every rule — the same engine your agent uses"
+            >
+              Seat everyone
+            </Button>
+            <div className="masthead-icongroup" role="group" aria-label="History">
+              <button type="button" onClick={() => s.undo()} disabled={s.undoStack.length === 0} title="Undo (⌘Z)" aria-label="Undo">
+                <span aria-hidden="true">↶</span>
+              </button>
+              <button type="button" onClick={() => s.redo()} disabled={s.redoStack.length === 0} title="Redo (⇧⌘Z)" aria-label="Redo">
+                <span aria-hidden="true">↷</span>
+              </button>
+            </div>
+          </>
+        )}
         <Button
           data-tour="export"
           variant="outline"
@@ -154,13 +163,27 @@ export function Header({ onWelcomeGuide }: { onWelcomeGuide: () => void }) {
           <Printer data-icon="inline-start" className="size-3.5" aria-hidden="true" />
           Print…
         </Button>
-        <HeaderMenu entries={menu} />
+        {!s.shared && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-md px-3 text-[12.5px]"
+            onClick={() => setShowShare(true)}
+            disabled={empty}
+            title="A view-only link to this chart for family, a client, the venue, or the caterer — nothing is uploaded"
+          >
+            <Link2 data-icon="inline-start" className="size-3.5" aria-hidden="true" />
+            Share link…
+          </Button>
+        )}
+        {!s.shared && <HeaderMenu entries={menu} />}
       </div>
 
       <Suspense fallback={null}>
         {showTools && <ToolsPage onClose={() => setShowTools(false)} />}
         {s.exportOpen && <ExportDialog onClose={() => s.setExportOpen(false)} />}
         {showShortcuts && <ShortcutsDialog open onOpenChange={setShowShortcuts} />}
+        {showShare && !s.shared && <ShareDialog onClose={() => setShowShare(false)} />}
       </Suspense>
     </header>
   )

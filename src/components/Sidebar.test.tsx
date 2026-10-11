@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { freshVenue, freshVenueDimensions } from '../geometry'
 import { useStore } from '../store'
+import { SAMPLE } from '../sample'
 import { Sidebar } from './Sidebar'
 
 function resetStore() {
@@ -93,5 +94,28 @@ describe('sidebar add flows', () => {
     await user.click(screen.getByRole('button', { name: /Activity.*No recent activity/i }))
     expect(screen.getByRole('region', { name: 'Activity workspace' })).toBeVisible()
     expect(screen.getByText('Recent activity')).toBeVisible()
+  })
+
+  it('applies a suggested rule preset only after the human presses Add, as their own undoable step', async () => {
+    const user = userEvent.setup()
+    useStore.getState().loadSample(SAMPLE)
+    useStore.setState({ undoStack: [], agentLog: [] })
+    const before = useStore.getState().constraints.length
+    render(<Sidebar open onOpenChange={() => {}} />)
+
+    await user.click(screen.getByRole('button', { name: /House rules/ }))
+    await user.click(screen.getByRole('button', { name: 'Wedding presets' }))
+    expect(screen.getByLabelText('Which preset')).toHaveFocus()
+
+    await user.click(screen.getByRole('button', { name: /Review suggestion: Away from the band for Grandma Adaeze Okafor/ }))
+    // Reviewing fills the picker and previews the rule — nothing is applied yet.
+    expect(screen.getByText('Grandma Adaeze Okafor sits away from the band')).toBeVisible()
+    expect(useStore.getState().constraints).toHaveLength(before)
+
+    await user.click(screen.getByRole('button', { name: 'Add Rule' }))
+    expect(useStore.getState().constraints).toHaveLength(before + 1)
+    expect(useStore.getState().agentLog[0]).toMatchObject({ tool: 'rule preset', source: 'you' })
+    useStore.getState().undo()
+    expect(useStore.getState().constraints).toHaveLength(before)
   })
 })

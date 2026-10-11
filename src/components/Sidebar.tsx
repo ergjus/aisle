@@ -2,10 +2,12 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'rea
 import { ChevronRight, History, MapPin, Plus, ShieldCheck, Table2, Users, type LucideIcon } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { selectCore, useStore } from '../store'
-import { groupColors, parseGuestEntries } from '../utils'
-import { SPREADSHEET_ACCEPT, SpreadsheetError, readSpreadsheet } from '../import/spreadsheet'
+import { groupColors } from '../utils'
+import { SPREADSHEET_ACCEPT, SpreadsheetError, describeImport, guestImportFromText, readSpreadsheet } from '../import/spreadsheet'
 import { constraintStatus, constraintText, findDuplicateRule, zoneLabel, zoneNoun, type RuleDraft } from '../constraints'
 import { feetSize, formatFeet, tableSize } from '../geometry'
+import { RULE_PRESETS, draftText, planRulePreset, planSummary, rulePreset, suggestRulePresets, type RulePresetId } from '../presets'
+import { applyRulePreset } from '../actions'
 import type { Constraint, TableShape, VenueFeatureId, ZoneId } from '../types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -663,14 +665,18 @@ function GuestsSection() {
   }
 
   const runImport = () => {
-    const entries = parseGuestEntries(importText)
-    if (entries.length === 0) {
+    // Same reader as the agent's import_guests: rows pasted out of Sheets,
+    // Excel or a planning site's export, header or not, or one per line.
+    const sheet = guestImportFromText(importText)
+    if (sheet.entries.length === 0) {
       s.setToast('No guest names found in that text.')
       return
     }
-    const added = s.importGuests(entries)
-    s.setToast(`Imported ${added.length} guest${added.length === 1 ? '' : 's'}.`)
-    s.logActivity('import guests', `Imported ${added.length} guest${added.length === 1 ? '' : 's'} from a pasted list.`, 'you')
+    const added = s.importGuests(sheet.entries)
+    const skipped = sheet.entries.length - added.length
+    const detail = skipped > 0 ? ` (${skipped} already on the list)` : ''
+    s.setToast(`${describeImport(sheet)}. Imported ${added.length}${detail}.`)
+    s.logActivity('import guests', `Imported ${added.length} guest${added.length === 1 ? '' : 's'} from a pasted list${detail}.`, 'you')
     setImportText('')
     setShowImport(false)
   }
@@ -688,7 +694,7 @@ function GuestsSection() {
       const added = s.importGuests(sheet.entries)
       const skipped = sheet.entries.length - added.length
       const detail = skipped > 0 ? ` (${skipped} already on the list)` : ''
-      s.setToast(`Imported ${added.length} guest${added.length === 1 ? '' : 's'} from ${file.name}${detail}.`)
+      s.setToast(`${describeImport(sheet)}. Imported ${added.length} from ${file.name}${detail}.`)
       s.logActivity(
         'import guests',
         `Imported ${added.length} guest${added.length === 1 ? '' : 's'} from ${file.name}${detail}.`,
@@ -944,15 +950,16 @@ function GuestPicker(props: {
   value: string
   onChange: (id: string) => void
   placeholder: string
-  exclude?: string
+  exclude?: string | string[]
   autoFocus?: boolean
 }) {
   const { guestOrder, guests } = useStore(useShallow((state) => ({
     guestOrder: state.guestOrder,
     guests: state.guests,
   })))
+  const excluded = new Set(Array.isArray(props.exclude) ? props.exclude : props.exclude ? [props.exclude] : [])
   const items = guestOrder
-    .filter((id) => id !== props.exclude)
+    .filter((id) => !excluded.has(id))
     .map((id) => ({ value: id, label: guests[id].name }))
   const selected = items.find((i) => i.value === props.value) ?? null
   return (
@@ -1112,6 +1119,151 @@ function AddRule() {
   )
 }
 
+const PRESET_ITEMS = RULE_PRESETS.map((p) => ({ value: p.id, label: p.label }))
+
+/** Wedding rule presets: pick the case, pick the guests, see exactly which
+ *  rules it adds, then add them as one undoable step. Suggestions read the
+ *  guest list (notes, groups) but only ever fill the picker — the human
+ *  still presses Add. */
+function RulePresets() {
+  const s = useStore(useShallow((state) => ({
+    ...selectCore(state),
+    logActivity: state.logActivity,
+  })))
+  const [presetId, setPresetId] = useState<RulePresetId>('divorced_parents_apart')
+  const [picked, setPicked] = useState<string[]>([])
+  const preset = rulePreset(presetId)!
+  const isPair = preset.maxGuests === 2
+  const chosen = picked.filter((id) => s.guests[id])
+  const plan = chosen.length >= preset.minGuests ? planRulePreset(s, presetId, chosen) : null
+  // Only the chart data the suggestions read — not every render of the section.
+  const suggestions = useMemo(
+    () => suggestRulePresets(s),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [s.guests, s.guestOrder, s.constraints, s.venue, s.tables, s.tableOrder, s.groupOrder],
+  )
+
+  const choosePreset = (id: RulePresetId) => {
+    setPresetId(id)
+    setPicked([])
+  }
+  const setPairAt = (index: number, id: string) => {
+    const next = [picked[0] ?? '', picked[1] ?? '']
+    next[index] = id
+    setPicked(next)
+  }
+  const apply = () => {
+    if (!plan || plan.error || plan.add.length === 0) return
+    const before = selectCore(useStore.getState())
+    const result = applyRulePreset(presetId, chosen)
+    if (result.added.length === 0) return
+    s.logActivity('rule preset', planSummary(before, result.plan), 'you')
+    setPicked([])
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Select items={PRESET_ITEMS} value={presetId} onValueChange={(v) => v !== null && choosePreset(v as RulePresetId)}>
+        <SelectTrigger size="sm" className="w-full" aria-label="Which preset" data-add-autofocus="">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PRESET_ITEMS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="px-0.5 text-[11.5px] text-ink-soft">{preset.blurb}</p>
+      {isPair ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <div className="min-w-[120px] flex-1">
+            <GuestPicker key={`${presetId}-a`} value={picked[0] ?? ''} onChange={(id) => setPairAt(0, id)} placeholder="a guest…" exclude={picked[1]} />
+          </div>
+          <span className="text-[12.5px] text-ink-soft">and</span>
+          <div className="min-w-[120px] flex-1">
+            <GuestPicker key={`${presetId}-b`} value={picked[1] ?? ''} onChange={(id) => setPairAt(1, id)} placeholder="another guest…" exclude={picked[0]} />
+          </div>
+        </div>
+      ) : (
+        <>
+          {chosen.length > 0 && (
+            <div className="flex flex-wrap gap-1" aria-label="Chosen guests">
+              {chosen.map((id) => (
+                <span key={id} className="inline-flex items-center gap-0.5 rounded-[3px] border border-hairline bg-card py-0.5 pr-0.5 pl-1.5 text-[12px]">
+                  {s.guests[id].name}
+                  <button
+                    className="px-0.5 leading-none text-ink-faint hover:text-brick"
+                    aria-label={`Remove ${s.guests[id].name} from the preset`}
+                    onClick={() => setPicked(chosen.filter((g) => g !== id))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <GuestPicker
+            key={`${presetId}-${chosen.length}`}
+            value=""
+            onChange={(id) => id && setPicked([...chosen, id])}
+            placeholder={chosen.length === 0 ? 'add a guest…' : 'add another guest…'}
+            exclude={chosen}
+          />
+        </>
+      )}
+      {plan?.error && <p className="px-0.5 text-[11.5px] text-brick">{plan.error}</p>}
+      {plan && !plan.error && (
+        <div className="px-0.5 text-[11.5px] text-ink-soft">
+          {plan.add.length > 0 ? (
+            <ul className="list-inside list-disc">
+              {plan.add.map((d, i) => (
+                <li key={i}>{draftText(s, d)}</li>
+              ))}
+            </ul>
+          ) : (
+            <p>Nothing new — the chart already has {plan.skipped.length === 1 ? 'that rule' : 'those rules'}.</p>
+          )}
+          {plan.add.length > 0 && plan.skipped.length > 0 && (
+            <p className="text-ink-faint">{plan.skipped.length} already in place, skipped.</p>
+          )}
+          {plan.warnings.map((w) => (
+            <p key={w} className="text-gold-ink">{w}</p>
+          ))}
+        </div>
+      )}
+      <Button variant="outline" size="sm" onClick={apply} disabled={!plan || !!plan.error || plan.add.length === 0}>
+        {plan && !plan.error && plan.add.length > 1 ? `Add ${plan.add.length} Rules` : 'Add Rule'}
+      </Button>
+      {suggestions.length > 0 && (
+        <div className="mt-1 flex flex-col gap-1 border-t border-hairline pt-1.5">
+          <span className="smallcaps pl-0.5 text-[13px] text-ink-soft">Suggested from your guest list</span>
+          {suggestions.slice(0, 5).map((sug) => (
+            <div key={`${sug.preset}:${sug.guestIds.join(',')}`} className="flex items-start gap-2 px-0.5">
+              <span className="flex-1 text-[12px]">
+                {rulePreset(sug.preset)!.label}: {sug.guestIds.map((id) => s.guests[id].name).join(', ')}
+                <span className="block text-[11px] text-ink-faint italic">from {sug.reason}</span>
+              </span>
+              <Button
+                variant="ghost"
+                size="xs"
+                aria-label={`Review suggestion: ${rulePreset(sug.preset)!.label} for ${sug.guestIds.map((id) => s.guests[id].name).join(', ')}`}
+                onClick={() => {
+                  setPresetId(sug.preset)
+                  setPicked(sug.guestIds)
+                }}
+              >
+                Review
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function RulesSection() {
   const s = useStore(useShallow((state) => ({
     ...selectCore(state),
@@ -1120,6 +1272,7 @@ function RulesSection() {
     setRuleHighlight: state.setRuleHighlight,
   })))
   const [addingRule, setAddingRule] = useState(false)
+  const [addingPreset, setAddingPreset] = useState(false)
   const counts = { ok: 0, violated: 0, pending: 0 }
   for (const c of s.constraints) counts[constraintStatus(s, c)]++
 
@@ -1149,6 +1302,16 @@ function RulesSection() {
         >
           <AddRule />
         </InlineAddPanel>
+        <div className="mt-1.5">
+          <InlineAddPanel
+            buttonLabel="Wedding presets"
+            title="Rule presets"
+            open={addingPreset}
+            onOpenChange={setAddingPreset}
+          >
+            <RulePresets />
+          </InlineAddPanel>
+        </div>
         {s.constraints.length > 0 && (
           <p className="mt-1.5 px-1 text-xs font-bold">
             <span className="text-sage">{counts.ok} kept</span>
@@ -1272,7 +1435,8 @@ function CollapseToggle(props: { open: boolean; onClick: () => void }) {
       title={`${props.open ? 'Collapse' : 'Expand'} the sidebar (⌘B)`}
       onClick={props.onClick}
     >
-      <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', props.open && 'rotate-180')} aria-hidden="true" />
+      {/* The plan sits on the right, so the chevron points the way it will fold. */}
+      <ChevronRight className={cn('h-3.5 w-3.5 transition-transform', !props.open && 'rotate-180')} aria-hidden="true" />
     </button>
   )
 }
@@ -1292,7 +1456,7 @@ function SidebarRail(props: {
   return (
     <aside
       id="sidebar-panel"
-      className="hidden min-h-0 flex-col items-center overflow-hidden border-r border-hairline bg-ivory px-1.5 pt-1 pb-3 md:flex"
+      className="hidden min-h-0 flex-col items-center overflow-hidden border-l border-hairline bg-ivory px-1.5 pt-1 pb-3 md:flex"
     >
       <CollapseToggle open={false} onClick={props.onExpand} />
       {/* Each section keeps its icon and its count, set as a legible pair
@@ -1397,7 +1561,7 @@ export function Sidebar({ open: sidebarOpen, onOpenChange }: { open: boolean; on
   return (
     <aside
       id="sidebar-panel"
-      className="hidden min-h-0 flex-col overflow-hidden border-r border-hairline bg-ivory px-2 pt-1 pb-2 md:flex"
+      className="hidden min-h-0 flex-col overflow-hidden border-l border-hairline bg-ivory px-2 pt-1 pb-2 md:flex"
     >
       {/* A slim rail of its own above the sections, so the control sits in the
           same place whether the sidebar is open or folded away. */}

@@ -1,5 +1,7 @@
 import { getCore, useStore } from './store'
 import { autoArrange } from './solver'
+import { planRulePreset, rulePreset, type PresetPlan, type RulePresetId } from './presets'
+import type { Constraint } from './types'
 
 /**
  * Run the solver from the UI — the same engine the agent's auto_arrange tool
@@ -27,4 +29,17 @@ export function seatEveryone(mode: 'full' | 'repair'): void {
   store.markTouched([...touched, ...tables])
   store.logActivity(mode === 'repair' ? 'fix broken rules' : 'seat everyone', result.explanation.split('\n')[0], 'you')
   store.setToast(result.explanation.split('\n')[0])
+}
+
+/**
+ * Apply a rule preset to the chosen guests — the sidebar's preset picker and
+ * the agent's apply_rule_preset tool both land here, as one undoable step.
+ * Logging is left to the caller, which knows whose hand it was.
+ */
+export function applyRulePreset(preset: RulePresetId, guestIds: string[]): { plan: PresetPlan; added: Constraint[] } {
+  const plan = planRulePreset(getCore(), preset, guestIds)
+  if (plan.error || plan.add.length === 0) return { plan, added: [] }
+  const label = `apply preset: ${rulePreset(preset)!.label.toLowerCase()}`
+  const added = useStore.getState().addConstraints(plan.add, label)
+  return { plan, added }
 }
